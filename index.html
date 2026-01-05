@@ -36,7 +36,12 @@
             from { transform: translateY(100%); opacity: 0; }
             to { transform: translateY(0); opacity: 1; }
         }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
         .toast-enter { animation: slideIn 0.3s ease-out forwards; }
+        .fade-in { animation: fadeIn 0.3s ease-out forwards; }
 
         /* Estilos móvil */
         .mobile-nav-item {
@@ -54,6 +59,15 @@
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Ocultar scrollbar en elementos horizontales móvil */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
         }
     </style>
 
@@ -89,7 +103,7 @@
             Truck, Phone, Mail, ArrowUpCircle, ArrowDownCircle, 
             Clock, Edit3, Crown, Layers, Scissors, Shirt, Users,
             Package, FileText, ClipboardList, ChevronDown, ChevronUp,
-            CalendarClock
+            CalendarClock, Menu, Grid
         } from 'lucide-react';
 
         // --- FIREBASE SETUP ---
@@ -417,6 +431,9 @@
             const [activeTab, setActiveTab] = useState('orders'); // orders, debts, finances, stats, clients, suppliers
             const [user, setUser] = useState(null);
             
+            // Mobile Menu State
+            const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
             // Data Collections
             const [orders, setOrders] = useState([]);
             const [expenses, setExpenses] = useState([]);
@@ -970,7 +987,7 @@
                     {/* Toasts */}
                     {toasts.map(t => <Toast key={t.id} message={t.message} type={t.type} onClose={() => removeToast(t.id)} />)}
 
-                    {/* --- SIDEBAR --- */}
+                    {/* --- SIDEBAR (PC) --- */}
                     <aside className="hidden md:flex flex-col w-72 bg-[#0c0a09] border-r border-stone-800 h-full shrink-0 z-20 shadow-xl">
                         <div className="p-8 flex items-center gap-4">
                             <div className="bg-gradient-to-br from-amber-500 to-amber-600 text-white p-2.5 rounded-xl shadow-lg shadow-amber-900/40">
@@ -1020,17 +1037,17 @@
                         <div className="md:hidden bg-[#0c0a09] p-4 flex justify-between items-center shrink-0 z-30">
                             <div className="flex items-center gap-3">
                                 <BrandIcon size={24} className="text-amber-500" />
-                                <span className="text-white font-bold text-xl brand-font tracking-wide">OSIRIS</span>
+                                <span className="text-white font-bold text-lg brand-font tracking-wide">OSIRIS</span>
                             </div>
-                            <button onClick={() => { setEditingId(null); setForm({ client: '', detail: '', price: '', quantity: 1, paid: false, delivered: false, important: false, date: new Date().toISOString().split('T')[0] }); setIsModalOpen(true); }} className="bg-amber-600 text-white p-2 rounded-lg shadow-lg"><Plus size={24}/></button>
+                            <button onClick={() => { setEditingId(null); setForm({ client: '', detail: '', price: '', quantity: 1, paid: false, delivered: false, important: false, date: new Date().toISOString().split('T')[0] }); setIsModalOpen(true); }} className="bg-amber-600 text-white p-2 rounded-lg shadow-lg active:scale-95 transition-transform"><Plus size={24}/></button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 md:max-w-7xl md:mx-auto w-full">
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 md:max-w-7xl md:mx-auto w-full pb-24 md:pb-8">
                             
                             {/* Header Section */}
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
                                 <div>
-                                    <h2 className="text-3xl font-bold text-stone-900 brand-font">Vestite para ganar.</h2>
+                                    <h2 className="text-2xl md:text-3xl font-bold text-stone-900 brand-font">Vestite para ganar.</h2>
                                     <p className="text-stone-500 mt-1 flex items-center gap-2 text-sm"><Calendar size={14}/> {capitalizedMonth}</p>
                                 </div>
                                 {activeTab === 'orders' && (
@@ -1046,22 +1063,22 @@
                                 <div className="space-y-6 animate-in fade-in duration-300">
                                     {/* Stats Cards */}
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-                                        <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm">
+                                        <div className="bg-white p-4 md:p-5 rounded-2xl border border-stone-100 shadow-sm">
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Ventas Totales</p>
-                                            <p className="text-2xl font-bold text-stone-900">${filteredOrders.reduce((acc,o) => acc + o.price, 0).toLocaleString()}</p>
+                                            <p className="text-xl md:text-2xl font-bold text-stone-900">${filteredOrders.reduce((acc,o) => acc + o.price, 0).toLocaleString()}</p>
                                         </div>
-                                        <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm">
+                                        <div className="bg-white p-4 md:p-5 rounded-2xl border border-stone-100 shadow-sm">
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Por Cobrar</p>
-                                            <p className="text-2xl font-bold text-amber-600">${filteredOrders.filter(o=>!o.paid).reduce((acc,o) => acc + o.price, 0).toLocaleString()}</p>
+                                            <p className="text-xl md:text-2xl font-bold text-amber-600">${filteredOrders.filter(o=>!o.paid).reduce((acc,o) => acc + o.price, 0).toLocaleString()}</p>
                                         </div>
-                                        <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm">
+                                        <div className="bg-white p-4 md:p-5 rounded-2xl border border-stone-100 shadow-sm">
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Pendiente Entrega</p>
-                                            <p className="text-2xl font-bold text-stone-800">{filteredOrders.filter(o=>!o.delivered).length}</p>
+                                            <p className="text-xl md:text-2xl font-bold text-stone-800">{filteredOrders.filter(o=>!o.delivered).length}</p>
                                         </div>
-                                        <div className="bg-stone-900 p-5 rounded-2xl shadow-lg text-white relative overflow-hidden">
+                                        <div className="bg-stone-900 p-4 md:p-5 rounded-2xl shadow-lg text-white relative overflow-hidden">
                                             <div className="absolute right-0 top-0 opacity-10 p-2"><Award size={48}/></div>
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Ticket Promedio</p>
-                                            <p className="text-2xl font-bold text-amber-400">${filteredOrders.length > 0 ? Math.round(filteredOrders.reduce((acc,o) => acc + o.price, 0) / filteredOrders.length).toLocaleString() : 0}</p>
+                                            <p className="text-xl md:text-2xl font-bold text-amber-400">${filteredOrders.length > 0 ? Math.round(filteredOrders.reduce((acc,o) => acc + o.price, 0) / filteredOrders.length).toLocaleString() : 0}</p>
                                         </div>
                                     </div>
 
@@ -1145,8 +1162,8 @@
                                     <div className="flex justify-between items-center">
                                         <div><h3 className="font-bold text-xl brand-font">Cartera de Clientes</h3><p className="text-sm text-stone-500">Gestión de fidelidad</p></div>
                                         <div className="flex gap-2">
-                                            <button onClick={() => setIsClientStatsModalOpen(true)} className="bg-white border border-stone-200 text-stone-600 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-50 hover:text-stone-800"><BarChart3 size={16}/> Estadísticas</button>
-                                            <button onClick={() => { setEditingClientId(null); setClientForm({name:'', phone:'', email:'', address:'', notes:''}); setIsClientModalOpen(true); }} className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-800 shadow-lg shadow-stone-900/10"><Plus size={16}/> Nuevo Cliente</button>
+                                            <button onClick={() => setIsClientStatsModalOpen(true)} className="bg-white border border-stone-200 text-stone-600 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-50 hover:text-stone-800"><BarChart3 size={16}/> <span className="hidden md:inline">Estadísticas</span></button>
+                                            <button onClick={() => { setEditingClientId(null); setClientForm({name:'', phone:'', email:'', address:'', notes:''}); setIsClientModalOpen(true); }} className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-800 shadow-lg shadow-stone-900/10"><Plus size={16}/> <span className="hidden md:inline">Nuevo Cliente</span></button>
                                         </div>
                                     </div>
                                     
@@ -1204,7 +1221,7 @@
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
                                      <div className="flex justify-between items-center">
                                         <div><h3 className="font-bold text-xl brand-font">Proveedores</h3><p className="text-sm text-stone-500">Logística y stock</p></div>
-                                        <button onClick={() => { setEditingSupplierId(null); setSupplierForm({name:'', cuit:'', phone:'', address:'', products:'', notes:''}); setIsSupplierModalOpen(true); }} className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-800 shadow-lg shadow-stone-900/10"><Plus size={16}/> Nuevo Proveedor</button>
+                                        <button onClick={() => { setEditingSupplierId(null); setSupplierForm({name:'', cuit:'', phone:'', address:'', products:'', notes:''}); setIsSupplierModalOpen(true); }} className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-800 shadow-lg shadow-stone-900/10"><Plus size={16}/> <span className="hidden md:inline">Nuevo Proveedor</span></button>
                                     </div>
 
                                     {/* Lista de Proveedores */}
@@ -1231,12 +1248,14 @@
                                         ))}
                                     </div>
 
-                                    {/* Historial de Pedidos a Proveedores */}
+                                    {/* Historial de Pedidos a Proveedores - Tabla PC / Cards Mobile */}
                                     <div className="bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden mt-8">
                                         <div className="px-6 py-4 border-b border-stone-50 bg-stone-50/30 flex justify-between items-center">
                                             <h3 className="font-bold text-stone-800 flex items-center gap-2"><ClipboardList size={18}/> Registro de Mercadería</h3>
                                         </div>
-                                        <div className="overflow-x-auto">
+                                        
+                                        {/* Vista Escritorio: Tabla */}
+                                        <div className="hidden md:block overflow-x-auto">
                                             <table className="w-full text-sm">
                                                 <thead className="bg-stone-50 text-xs text-stone-500 uppercase font-bold text-left"><tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Proveedor</th><th className="px-6 py-3">Detalle</th><th className="px-6 py-3 text-right">Monto</th><th className="px-6 py-3 text-center">Recibido</th></tr></thead>
                                                 <tbody className="divide-y divide-stone-50">
@@ -1259,6 +1278,28 @@
                                                 </tbody>
                                             </table>
                                         </div>
+
+                                        {/* Vista Móvil: Cards */}
+                                        <div className="md:hidden p-4 space-y-3">
+                                            {supplierOrders.sort((a,b) => new Date(b.date) - new Date(a.date)).map((o, i) => {
+                                                const suppName = suppliers.find(s => s.id === o.supplierId)?.name || 'Desconocido';
+                                                return (
+                                                    <div key={i} className="bg-stone-50 p-4 rounded-xl border border-stone-100 flex justify-between items-center">
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-xs text-stone-400 font-mono">{new Date(o.date).toLocaleDateString()}</span>
+                                                                <span className="text-xs font-bold text-stone-700 bg-white px-2 py-0.5 rounded border border-stone-200">{suppName}</span>
+                                                            </div>
+                                                            <p className="font-bold text-stone-900 mt-1">{o.detail}</p>
+                                                            <p className="text-stone-500 text-sm font-mono mt-0.5">${parseFloat(o.amount).toLocaleString()}</p>
+                                                        </div>
+                                                        <button onClick={() => handleSimpleSave('supplier_orders', { received: !o.received }, () => {}, () => {}, {}, o.id)} className={`p-2 rounded-full transition-colors ${o.received ? 'bg-emerald-100 text-emerald-600' : 'bg-white border border-stone-200 text-stone-300'}`}>
+                                                            {o.received ? <Check size={20}/> : <Circle size={20}/>}
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -1270,7 +1311,7 @@
                                         <div className="relative z-10 flex flex-col md:flex-row justify-between md:items-end gap-6">
                                             <div>
                                                 <p className="text-stone-400 text-xs font-bold uppercase tracking-widest mb-2">Balance Global Disponible</p>
-                                                <h3 className="text-5xl font-bold brand-font tracking-tight text-white">${finances.totalBalance.toLocaleString()}</h3>
+                                                <h3 className="text-4xl md:text-5xl font-bold brand-font tracking-tight text-white">${finances.totalBalance.toLocaleString()}</h3>
                                                 <div className="flex gap-4 mt-6">
                                                     <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div><span className="text-sm text-stone-300">Efvo: <b>${finances.totalCash.toLocaleString()}</b></span></div>
                                                     <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div><span className="text-sm text-stone-300">Dig: <b>${finances.totalTransfer.toLocaleString()}</b></span></div>
@@ -1303,7 +1344,9 @@
                                             <h3 className="font-bold text-stone-800">Movimientos Recientes</h3>
                                             <span className="text-xs text-stone-400 font-medium bg-white px-2 py-1 rounded border border-stone-100">{finances.movements.length} regs.</span>
                                         </div>
-                                        <div className="overflow-x-auto">
+                                        
+                                        {/* Vista Escritorio: Tabla */}
+                                        <div className="hidden md:block overflow-x-auto">
                                             <table className="w-full text-sm">
                                                 <thead className="bg-stone-50 text-xs text-stone-500 uppercase font-bold text-left"><tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Detalle</th><th className="px-6 py-3 text-right">Monto</th><th className="px-6 py-3 text-right">Acciones</th></tr></thead>
                                                 <tbody className="divide-y divide-stone-50">
@@ -1313,7 +1356,6 @@
                                                             <td className="px-6 py-3.5 font-medium text-stone-800">{m.desc} <span className={`text-[10px] px-1.5 rounded ml-2 ${m.type === 'income' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{m.type === 'income' ? 'IN' : 'OUT'}</span></td>
                                                             <td className={`px-6 py-3.5 text-right font-bold ${m.type === 'income' ? 'text-emerald-600' : 'text-red-500'}`}>{m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}</td>
                                                             <td className="px-6 py-3.5 text-right">
-                                                                {/* MODIFICADO: Botones editar/borrar solo para items manuales */}
                                                                 {(m.source === 'expenses' || m.source === 'extra_incomes') && (
                                                                     <div className="flex justify-end gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
                                                                         <button onClick={() => handleEditFinance(m)} className="p-1.5 hover:bg-stone-100 rounded text-stone-500"><Pencil size={14}/></button>
@@ -1327,6 +1369,29 @@
                                                 </tbody>
                                             </table>
                                         </div>
+
+                                        {/* Vista Móvil: Cards */}
+                                        <div className="md:hidden p-4 space-y-3">
+                                            {finances.movements.map((m, i) => (
+                                                <div key={i} className="bg-stone-50 p-4 rounded-xl border border-stone-100 flex justify-between items-center group">
+                                                    <div>
+                                                        <p className="text-xs text-stone-400 font-mono mb-1">{new Date(m.date).toLocaleDateString()}</p>
+                                                        <p className="font-bold text-stone-900 leading-tight">{m.desc}</p>
+                                                        <span className={`text-[10px] px-1.5 rounded mt-1 inline-block font-bold ${m.type === 'income' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{m.type === 'income' ? 'INGRESO' : 'GASTO'}</span>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className={`text-lg font-bold ${m.type === 'income' ? 'text-emerald-600' : 'text-red-500'}`}>{m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}</p>
+                                                        {(m.source === 'expenses' || m.source === 'extra_incomes') && (
+                                                            <div className="flex justify-end gap-2 mt-2">
+                                                                <button onClick={() => handleEditFinance(m)} className="text-stone-400 hover:text-stone-600"><Pencil size={16}/></button>
+                                                                <button onClick={() => handleDeleteFinance(m)} className="text-stone-400 hover:text-red-500"><Trash2 size={16}/></button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {finances.movements.length === 0 && <p className="text-center text-stone-400 py-6">Sin movimientos</p>}
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -1336,8 +1401,8 @@
                                     <div className="flex justify-between items-center">
                                         <div><h3 className="font-bold text-xl brand-font">Deudas & Cuotas</h3><p className="text-sm text-stone-500">Gestión de pasivos</p></div>
                                         <div className="flex gap-2">
-                                            <button onClick={() => setIsDebtStatsModalOpen(true)} className="bg-white border border-stone-200 text-stone-600 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-50 hover:text-stone-800"><CalendarClock size={16}/> Estadísticas</button>
-                                            <button onClick={() => setIsDebtModalOpen(true)} className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-800 shadow-lg shadow-stone-900/10"><Plus size={16}/> Nueva</button>
+                                            <button onClick={() => setIsDebtStatsModalOpen(true)} className="bg-white border border-stone-200 text-stone-600 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-50 hover:text-stone-800"><CalendarClock size={16}/> <span className="hidden md:inline">Estadísticas</span></button>
+                                            <button onClick={() => setIsDebtModalOpen(true)} className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-stone-800 shadow-lg shadow-stone-900/10"><Plus size={16}/> <span className="hidden md:inline">Nueva</span></button>
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1349,8 +1414,10 @@
                                                 </div>
                                                 <div className="flex items-center gap-4">
                                                     <span className={`text-xl font-bold brand-font ${d.paid ? 'text-stone-300' : 'text-red-500'}`}>${d.amount.toLocaleString()}</span>
-                                                    <button onClick={() => handleSimpleSave('debts', { paid: !d.paid }, () => {}, () => {}, {}, d.id)} className={`p-2 rounded-full transition-colors ${d.paid ? 'bg-emerald-100 text-emerald-600' : 'bg-stone-100 text-stone-400 hover:bg-stone-200'}`}>{d.paid ? <Check size={18}/> : <Circle size={18}/>}</button>
-                                                    <button onClick={() => handleDelete('debts', d.id)} className="p-2 text-stone-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={18}/></button>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => handleSimpleSave('debts', { paid: !d.paid }, () => {}, () => {}, {}, d.id)} className={`p-2 rounded-full transition-colors ${d.paid ? 'bg-emerald-100 text-emerald-600' : 'bg-stone-100 text-stone-400 hover:bg-stone-200'}`}>{d.paid ? <Check size={18}/> : <Circle size={18}/>}</button>
+                                                        <button onClick={() => handleDelete('debts', d.id)} className="p-2 text-stone-300 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100 transition-all"><Trash2 size={18}/></button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         ))}
@@ -1393,17 +1460,56 @@
                         </div>
                         
                         {/* Mobile Nav */}
-                        <div className="md:hidden bg-white border-t border-stone-200 flex justify-around pb-safe pt-1 overflow-x-auto">
-                            {['orders', 'clients', 'suppliers', 'finances'].map(t => (
-                                <button key={t} onClick={() => setActiveTab(t)} className={`flex flex-col items-center py-3 px-2 min-w-[4rem] ${activeTab === t ? 'text-amber-600' : 'text-stone-400'}`}>
-                                    {t==='orders' && <Home size={20} strokeWidth={activeTab===t?2.5:2} />}
-                                    {t==='clients' && <Users size={20} strokeWidth={activeTab===t?2.5:2} />}
-                                    {t==='suppliers' && <Truck size={20} strokeWidth={activeTab===t?2.5:2} />}
-                                    {t==='finances' && <Wallet size={20} strokeWidth={activeTab===t?2.5:2} />}
-                                    <span className="text-[10px] font-medium mt-1 capitalize">{t === 'orders' ? 'Pedidos' : t}</span>
+                        <div className="md:hidden bg-white border-t border-stone-200 flex justify-between px-4 pb-safe pt-2 z-40 fixed bottom-0 w-full shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
+                            {[
+                                {id: 'orders', icon: Home, label: 'Pedidos'},
+                                {id: 'clients', icon: Users, label: 'Clientes'},
+                                {id: 'debts', icon: Receipt, label: 'Deudas'},
+                                {id: 'finances', icon: Wallet, label: 'Finanzas'},
+                            ].map(t => (
+                                <button key={t.id} onClick={() => { setActiveTab(t.id); setIsMobileMenuOpen(false); }} className={`mobile-nav-item ${activeTab === t.id && !isMobileMenuOpen ? 'active' : ''}`}>
+                                    <t.icon size={22} />
+                                    <span className="text-[10px] font-bold mt-1">{t.label}</span>
                                 </button>
                             ))}
+                            <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className={`mobile-nav-item ${isMobileMenuOpen ? 'text-stone-900' : ''}`}>
+                                <Menu size={22} />
+                                <span className="text-[10px] font-bold mt-1">Menú</span>
+                            </button>
                         </div>
+                        
+                        {/* Mobile Menu Overlay */}
+                        {isMobileMenuOpen && (
+                            <div className="md:hidden fixed inset-0 z-30 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200 flex flex-col justify-end pb-24" onClick={() => setIsMobileMenuOpen(false)}>
+                                <div className="bg-white rounded-t-3xl p-6 animate-in slide-in-from-bottom-10 duration-300" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-center justify-center mb-6">
+                                        <div className="w-12 h-1 bg-stone-200 rounded-full"></div>
+                                    </div>
+                                    <h3 className="font-bold text-xl text-stone-900 brand-font mb-6 px-2">Más Opciones</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <button onClick={() => { setActiveTab('suppliers'); setIsMobileMenuOpen(false); }} className="p-4 bg-stone-50 hover:bg-stone-100 rounded-xl flex flex-col items-center gap-2 transition-colors">
+                                            <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-stone-700"><Truck size={20}/></div>
+                                            <span className="font-bold text-stone-700 text-sm">Proveedores</span>
+                                        </button>
+                                        <button onClick={() => { setActiveTab('stats'); setIsMobileMenuOpen(false); }} className="p-4 bg-stone-50 hover:bg-stone-100 rounded-xl flex flex-col items-center gap-2 transition-colors">
+                                            <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-amber-600"><BarChart3 size={20}/></div>
+                                            <span className="font-bold text-stone-700 text-sm">Estadísticas</span>
+                                        </button>
+                                        <button onClick={() => { setTempCredentials({...credentials}); setIsSettingsOpen(true); setIsMobileMenuOpen(false); }} className="p-4 bg-stone-50 hover:bg-stone-100 rounded-xl flex flex-col items-center gap-2 transition-colors">
+                                            <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-stone-500"><Settings size={20}/></div>
+                                            <span className="font-bold text-stone-700 text-sm">Configuración</span>
+                                        </button>
+                                        <button onClick={handleLogout} className="p-4 bg-red-50 hover:bg-red-100 rounded-xl flex flex-col items-center gap-2 transition-colors">
+                                            <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-red-500"><LogOut size={20}/></div>
+                                            <span className="font-bold text-red-600 text-sm">Cerrar Sesión</span>
+                                        </button>
+                                    </div>
+                                    <div className="mt-8 text-center">
+                                         <p className="text-[10px] text-stone-400">Osiris Mobile v1.1 • Powered by JA</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </main>
 
                     {/* --- MODALS --- */}
