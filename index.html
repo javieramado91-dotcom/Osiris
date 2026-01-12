@@ -474,6 +474,11 @@
             const [pendingDeliveryId, setPendingDeliveryId] = useState(null);
             const [deliveryDateInput, setDeliveryDateInput] = useState('');
 
+	// Estados para "Hecho" (Step 1)
+     	   const [isDoneModalOpen, setIsDoneModalOpen] = useState(false);
+       	 const [pendingDoneId, setPendingDoneId] = useState(null);
+       	 const [doneDateInput, setDoneDateInput] = useState('');
+
             // Finance Modals States (Actualizado con mixedCash/mixedTransfer)
             const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
             const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString() });
@@ -617,6 +622,9 @@
                 let matchesFilter = true;
                 if (orderFilter === 'pending_pay') matchesFilter = !o.paid;
                 if (orderFilter === 'pending_delivery') matchesFilter = !o.delivered;
+
+	if (orderFilter === 'done') matchesFilter = o.done;   // <--- ESTA ES LA NUEVA
+
                 if (orderFilter === 'delivered') matchesFilter = o.delivered;
                 if (orderFilter === 'important') matchesFilter = o.important;
                 return matchesDate && matchesSearch && matchesFilter;
@@ -890,7 +898,7 @@
                 });
             };
 
-            const toggleStatus = async (order, field) => {
+   const toggleStatus = async (order, field) => {
                 const updates = {};
                 if (field === 'paid') {
                     if (!order.paid) { 
@@ -900,11 +908,22 @@
                     if (!order.delivered) { 
                         setPendingDeliveryId(order.id); setDeliveryDateInput(new Date().toISOString().slice(0, 16)); setIsDeliveryModalOpen(true); return;
                     } else { updates.delivered = false; updates.deliveryDate = null; }
+                } else if (field === 'done') {
+                    // --- LÓGICA DE HECHO ---
+                    if (!order.done) { 
+                        setPendingDoneId(order.id); 
+                        setDoneDateInput(new Date().toISOString().slice(0, 16)); 
+                        setIsDoneModalOpen(true); 
+                        return;
+                    } else { 
+                        updates.done = false; 
+                        updates.doneDate = null; 
+                    }
+                    // -----------------------
                 } else { updates[field] = !order[field]; }
                 
                 await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updates);
             };
-
             const handleConfirmPayment = async (method) => {
                 const updates = { paid: true, paymentMethod: method, paymentDate: new Date().toISOString() };
                 if (method === 'mixed') {
@@ -923,6 +942,15 @@
                 });
                 setIsDeliveryModalOpen(false);
                 addToast('Entrega registrada');
+            };
+
+const handleDoneConfirm = async () => {
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', pendingDoneId), { 
+                    done: true, 
+                    doneDate: doneDateInput ? new Date(doneDateInput).toISOString() : new Date().toISOString() 
+                });
+                setIsDoneModalOpen(false);
+                addToast('Pedido marcado como realizado');
             };
 
             const handleSimpleSave = async (coll, data, setModal, cleanForm, defaultForm, id = null) => {
@@ -1168,10 +1196,11 @@
                                             <input type="text" placeholder="Buscar cliente, prenda..." className="w-full pl-11 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none text-sm font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                                         </div>
                                         <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                                            {['all', 'pending_pay', 'pending_delivery', 'delivered', 'important'].map(f => (
+                                        {['all', 'pending_pay', 'done', 'pending_delivery', 'delivered', 'important'].map(f => (
                                                 <button key={f} onClick={() => setOrderFilter(f)} className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${orderFilter === f ? 'bg-stone-900 text-white border-stone-900 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
                                                     {f === 'all' && 'Todos'}
                                                     {f === 'pending_pay' && 'Por Cobrar'}
+			   {f === 'done' && 'Realizados'}
                                                     {f === 'pending_delivery' && 'En Local'}
                                                     {f === 'delivered' && 'Entregados'}
                                                     {f === 'important' && 'Favoritos'}
@@ -1223,6 +1252,11 @@
                                                             <button onClick={() => toggleStatus(order, 'paid')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.paid ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300'}`}>
                                                                 {order.paid ? <CheckCircle2 size={14}/> : <Circle size={14}/>} {order.paid ? 'Pagado' : 'Cobrar'}
                                                             </button>
+
+<button onClick={() => toggleStatus(order, 'done')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.done ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300'}`}>
+                                                        <Scissors size={14}/> {order.done ? 'Hecho' : 'Hacer'}
+                                                    </button>
+
                                                             <button onClick={() => toggleStatus(order, 'delivered')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.delivered ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300'}`}>
                                                                 <Truck size={14}/> {order.delivered ? 'Entregado' : 'Entregar'}
                                                             </button>
@@ -1973,6 +2007,40 @@
                         </form>
                     </Modal>
                     
+{/* MODAL DE REALIZADO (PASO 7 FINAL) */}
+                    <Modal isOpen={isDoneModalOpen} onClose={() => setIsDoneModalOpen(false)} title="Confirmar Realización">
+                        {(() => {
+                            const order = orders.find(o => o.id === pendingDoneId);
+                            if (!order) return null;
+                            return (
+                                <div className="space-y-6">
+                                    <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 flex gap-4 items-start animate-in fade-in slide-in-from-top-2">
+                                        <div className="bg-white p-2.5 rounded-full text-purple-600 shrink-0 shadow-sm border border-purple-100">
+                                            <Scissors size={22} strokeWidth={2} />
+                                        </div>
+                                        <div>
+                                            <h4 className="font-bold text-purple-900 text-sm mb-1">Pedido listo/confeccionado:</h4>
+                                            <p className="text-purple-700 text-xs font-medium leading-relaxed">{order.detail}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-bold text-stone-500 uppercase tracking-widest ml-1">Fecha de finalización</label>
+                                        <div className="relative">
+                                            <input type="datetime-local" className="w-full p-3.5 pl-10 bg-stone-50 border border-stone-200 rounded-xl focus:border-stone-400 outline-none font-medium text-stone-700 shadow-sm transition-all" value={doneDateInput} onChange={(e) => setDoneDateInput(e.target.value)} />
+                                            <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-3 pt-2">
+                                        <button onClick={() => setIsDoneModalOpen(false)} className="flex-1 py-3.5 rounded-xl font-bold bg-stone-100 text-stone-600 hover:bg-stone-200 transition-colors">Cancelar</button>
+                                        <button onClick={handleDoneConfirm} className="flex-1 py-3.5 rounded-xl font-bold bg-stone-900 text-white hover:bg-stone-800 transition-colors shadow-lg shadow-stone-900/20 active:scale-95 transform duration-100">Confirmar</button>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+                    </Modal>
+
                     <ConfirmModal isOpen={confirmModal.isOpen} onClose={() => setConfirmModal({...confirmModal, isOpen: false})} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} isDanger={confirmModal.isDanger} confirmText={confirmModal.confirmText} />
                 </div>
             );
