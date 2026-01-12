@@ -620,6 +620,9 @@
                 const matchesDate = d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear();
                 const matchesSearch = (o.client + o.detail).toLowerCase().includes(searchTerm.toLowerCase());
                 let matchesFilter = true;
+
+	if (orderFilter === 'todo') matchesFilter = !o.done;
+
                 if (orderFilter === 'pending_pay') matchesFilter = !o.paid;
                 if (orderFilter === 'pending_delivery') matchesFilter = !o.delivered;
 
@@ -1166,14 +1169,21 @@ const handleDoneConfirm = async () => {
                                 )}
                             </div>
 
-                            {activeTab === 'orders' && (
+                           {activeTab === 'orders' && (
                                 <div className="space-y-6 animate-in fade-in duration-300">
-                                    {/* Stats Cards */}
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                                    {/* Stats Cards - ACTUALIZADO A 5 COLUMNAS */}
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
                                         <div className="bg-white p-4 md:p-5 rounded-2xl border border-stone-100 shadow-sm">
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Ventas Totales</p>
                                             <p className="text-xl md:text-2xl font-bold text-stone-900">${filteredOrders.reduce((acc,o) => acc + o.price, 0).toLocaleString()}</p>
                                         </div>
+
+                                        {/* NUEVA TARJETA: POR HACER */}
+                                        <div className="bg-white p-4 md:p-5 rounded-2xl border border-stone-100 shadow-sm">
+                                            <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Por Hacer</p>
+                                            <p className="text-xl md:text-2xl font-bold text-purple-600">{filteredOrders.filter(o=>!o.done).length}</p>
+                                        </div>
+
                                         <div className="bg-white p-4 md:p-5 rounded-2xl border border-stone-100 shadow-sm">
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Por Cobrar</p>
                                             <p className="text-xl md:text-2xl font-bold text-amber-600">${filteredOrders.filter(o=>!o.paid).reduce((acc,o) => acc + o.price, 0).toLocaleString()}</p>
@@ -1182,25 +1192,26 @@ const handleDoneConfirm = async () => {
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Pendiente Entrega</p>
                                             <p className="text-xl md:text-2xl font-bold text-stone-800">{filteredOrders.filter(o=>!o.delivered).length}</p>
                                         </div>
-                                        <div className="bg-stone-900 p-4 md:p-5 rounded-2xl shadow-lg text-white relative overflow-hidden">
+                                        <div className="bg-stone-900 p-4 md:p-5 rounded-2xl shadow-lg text-white relative overflow-hidden hidden md:block">
                                             <div className="absolute right-0 top-0 opacity-10 p-2"><Award size={48}/></div>
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Ticket Promedio</p>
                                             <p className="text-xl md:text-2xl font-bold text-amber-400">${filteredOrders.length > 0 ? Math.round(filteredOrders.reduce((acc,o) => acc + o.price, 0) / filteredOrders.length).toLocaleString() : 0}</p>
                                         </div>
                                     </div>
 
-                                    {/* Filters */}
+                                    {/* Filters - ACTUALIZADO CON BOTÓN "POR HACER" */}
                                     <div className="flex flex-col md:flex-row gap-4">
                                         <div className="relative flex-1">
                                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
                                             <input type="text" placeholder="Buscar cliente, prenda..." className="w-full pl-11 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none text-sm font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                                         </div>
                                         <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                                        {['all', 'pending_pay', 'done', 'pending_delivery', 'delivered', 'important'].map(f => (
+                                        {['all', 'todo', 'pending_pay', 'done', 'pending_delivery', 'delivered', 'important'].map(f => (
                                                 <button key={f} onClick={() => setOrderFilter(f)} className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${orderFilter === f ? 'bg-stone-900 text-white border-stone-900 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
                                                     {f === 'all' && 'Todos'}
+                                                    {f === 'todo' && 'Por Hacer'}
                                                     {f === 'pending_pay' && 'Por Cobrar'}
-			   {f === 'done' && 'Realizados'}
+                                                    {f === 'done' && 'Realizados'}
                                                     {f === 'pending_delivery' && 'En Local'}
                                                     {f === 'delivered' && 'Entregados'}
                                                     {f === 'important' && 'Favoritos'}
@@ -1253,9 +1264,9 @@ const handleDoneConfirm = async () => {
                                                                 {order.paid ? <CheckCircle2 size={14}/> : <Circle size={14}/>} {order.paid ? 'Pagado' : 'Cobrar'}
                                                             </button>
 
-<button onClick={() => toggleStatus(order, 'done')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.done ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300'}`}>
-                                                        <Scissors size={14}/> {order.done ? 'Hecho' : 'Hacer'}
-                                                    </button>
+                                                            <button onClick={() => toggleStatus(order, 'done')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.done ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300'}`}>
+                                                                <Scissors size={14}/> {order.done ? 'Hecho' : 'Hacer'}
+                                                            </button>
 
                                                             <button onClick={() => toggleStatus(order, 'delivered')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.delivered ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300'}`}>
                                                                 <Truck size={14}/> {order.delivered ? 'Entregado' : 'Entregar'}
