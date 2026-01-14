@@ -469,6 +469,7 @@
             const [pendingPaymentId, setPendingPaymentId] = useState(null);
             const [paymentModalStep, setPaymentModalStep] = useState('select');
             const [mixedAmounts, setMixedAmounts] = useState({ cash: 0, transfer: 0 });
+			const [partialAmount, setPartialAmount] = useState('');
 
             const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
             const [pendingDeliveryId, setPendingDeliveryId] = useState(null);
@@ -678,36 +679,54 @@
             }, [clients, orders]);
 
 
-            // FINANCES CALCULATION UPDATED FOR MIXED EXPENSES/INCOMES
+           // FINANCES CALCULATION UPDATED FOR PARTIAL PAYMENTS
             const finances = useMemo(() => {
                 const isCurrentMonth = (dateStr) => {
                     const d = new Date(dateStr);
                     return d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear();
                 };
 
-                // Normalize data structure logic
                 const mapFinanceItem = (item, type, source) => ({
-                    ...item,
-                    type,
-                    source,
+                    ...item, type, source,
                     desc: type === 'income' ? (item.client ? `${item.client} - ${item.detail}` : item.description) : item.description,
-                    amount: item.amount || item.price,
-                    date: item.paymentDate || item.date,
-                    paymentMethod: item.paymentMethod || item.method || 'cash', // Fallback to 'method' or default
+                    amount: parseFloat(item.amount),
+                    date: item.date,
+                    paymentMethod: item.paymentMethod || item.method || 'cash',
                     paymentDetails: item.paymentDetails || null
                 });
 
-                const monthPaidOrders = orders.filter(o => o.paid && isCurrentMonth(o.paymentDate || o.date)).map(o => mapFinanceItem(o, 'income', 'orders'));
+                // 1. Extraer pagos de pedidos (Completos antiguos, Completos nuevos y Parciales)
+                const orderMovements = [];
+                orders.forEach(o => {
+                    // Si tiene historial de pagos (Sistema Nuevo con parciales)
+                    if (o.paymentHistory && o.paymentHistory.length > 0) {
+                        o.paymentHistory.forEach((h, index) => {
+                            orderMovements.push(mapFinanceItem({
+                                ...h, 
+                                client: o.client, 
+                                detail: `Pago ${h.isPartial ? 'Parcial' : 'Final'} (${o.detail})`,
+                                id: `${o.id}_pay_${index}`, // ID único artificial para la lista
+                                date: h.date
+                            }, 'income', 'orders'));
+                        });
+                    } 
+                    // Si está pagado pero NO tiene historial (Sistema Viejo - Retrocompatibilidad)
+                    else if (o.paid) {
+                        orderMovements.push(mapFinanceItem({
+                            ...o, amount: o.price, date: o.paymentDate || o.date
+                        }, 'income', 'orders'));
+                    }
+                });
+
+                // Filtrar por mes actual para los totales del mes
+                const monthMovements = orderMovements.filter(m => isCurrentMonth(m.date));
                 const monthExpenses = expenses.filter(e => isCurrentMonth(e.date)).map(e => mapFinanceItem(e, 'expense', 'expenses'));
                 const monthIncomes = incomes.filter(i => isCurrentMonth(i.date)).map(i => mapFinanceItem(i, 'income', 'extra_incomes'));
 
-                const incomeVal = monthPaidOrders.reduce((acc, o) => acc + o.amount, 0) + monthIncomes.reduce((acc, i) => acc + i.amount, 0);
+                const incomeVal = monthMovements.reduce((acc, m) => acc + m.amount, 0) + monthIncomes.reduce((acc, i) => acc + i.amount, 0);
                 const expenseVal = monthExpenses.reduce((acc, e) => acc + e.amount, 0);
-                
-                const movements = [...monthPaidOrders, ...monthIncomes, ...monthExpenses]
-                    .sort((a, b) => new Date(b.date) - new Date(a.date));
 
-                // Helper to sum by method considering mixed payments
+                // Helper para sumar por método
                 const sumByMethod = (items, targetMethod) => items.reduce((sum, item) => {
                     if (item.paymentMethod === 'mixed' && item.paymentDetails) {
                         return sum + (parseFloat(item.paymentDetails[targetMethod]) || 0);
@@ -718,28 +737,48 @@
                     return sum;
                 }, 0);
 
-                const allPaidOrders = orders.filter(o => o.paid).map(o => mapFinanceItem(o, 'income', 'orders'));
+                const allOrderMovements = orderMovements; // Todos los tiempos
                 const allExpenses = expenses.map(e => mapFinanceItem(e, 'expense', 'expenses'));
                 const allIncomes = incomes.map(i => mapFinanceItem(i, 'income', 'extra_incomes'));
 
-                const totalCash = (sumByMethod(allPaidOrders, 'cash') + sumByMethod(allIncomes, 'cash')) - sumByMethod(allExpenses, 'cash');
-                const totalTransfer = (sumByMethod(allPaidOrders, 'transfer') + sumByMethod(allIncomes, 'transfer')) - sumByMethod(allExpenses, 'transfer');
+                const totalCash = (sumByMethod(allOrderMovements, 'cash') + sumByMethod(allIncomes, 'cash')) - sumByMethod(allExpenses, 'cash');
+                const totalTransfer = (sumByMethod(allOrderMovements, 'transfer') + sumByMethod(allIncomes, 'transfer')) - sumByMethod(allExpenses, 'transfer');
+
+                const movements = [...monthMovements, ...monthIncomes, ...monthExpenses].sort((a, b) => new Date(b.date) - new Date(a.date));
 
                 return { incomeVal, expenseVal, net: incomeVal - expenseVal, totalCash, totalTransfer, totalBalance: totalCash + totalTransfer, movements };
             }, [orders, expenses, incomes, currentDate]);
 
             const stats = useMemo(() => {
-                const yearOrders = orders.filter(o => o.paid && new Date(o.paymentDate || o.date).getFullYear() === currentDate.getFullYear());
-                const totalRevenue = yearOrders.reduce((acc, o) => acc + o.price, 0);
+                // Lógica de estadísticas actualizada para contar PAGOS REALES (incluyendo parciales)
+                const currentYear = currentDate.getFullYear();
+                
+                // Recolectar todos los pagos del año (Parciales y Totales)
+                const yearPayments = [];
+                orders.forEach(o => {
+                    if (o.paymentHistory && o.paymentHistory.length > 0) {
+                        o.paymentHistory.forEach(h => {
+                            if (new Date(h.date).getFullYear() === currentYear) {
+                                yearPayments.push({ amount: h.amount, date: h.date, detail: o.detail });
+                            }
+                        });
+                    } else if (o.paid && new Date(o.paymentDate || o.date).getFullYear() === currentYear) {
+                        yearPayments.push({ amount: o.price, date: o.paymentDate || o.date, detail: o.detail });
+                    }
+                });
+
+                const totalRevenue = yearPayments.reduce((acc, p) => acc + p.amount, 0);
                 
                 const chartData = [];
                 const months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
                 months.forEach((m, i) => {
-                    const val = yearOrders.filter(o => new Date(o.paymentDate || o.date).getMonth() === i).reduce((s,o) => s + o.price, 0);
+                    const val = yearPayments.filter(p => new Date(p.date).getMonth() === i).reduce((s,p) => s + p.amount, 0);
                     chartData.push({ label: m, value: val });
                 });
 
                 const counts = {};
+                // Para las categorías seguimos usando pedidos creados/pagados este año
+                const yearOrders = orders.filter(o => (o.paid || (o.amountPaid > 0)) && new Date(o.date).getFullYear() === currentYear);
                 yearOrders.forEach(o => {
                     const cat = identifyCategory(o.detail);
                     counts[cat] = (counts[cat] || 0) + 1;
@@ -928,40 +967,90 @@
                 await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updates);
             };
 
-            const handleConfirmPayment = async (method) => {
-                // 1. Buscamos el pedido actual para verificar su monto
+  const handleConfirmPayment = async (method) => {
                 const order = orders.find(o => o.id === pendingPaymentId);
                 
-                // 2. RESTRICCIÓN DE SEGURIDAD
+                // Validación de seguridad
                 if (!order || order.price <= 0) {
                     addToast('❌ No se puede cobrar un pedido con monto $0', 'error');
                     return;
                 }
 
-                const updates = { paid: true, paymentMethod: method, paymentDate: new Date().toISOString() };
-                
-                if (method === 'mixed') {
-                    const cash = parseFloat(mixedAmounts.cash) || 0;
-                    const transfer = parseFloat(mixedAmounts.transfer) || 0;
+                const now = new Date().toISOString();
+                let newHistoryItem = { date: now, method: method };
+                let isFullPayment = false;
+                let finalUpdates = {};
+
+                // --- CASO 1: PAGO PARCIAL ---
+                if (method === 'partial') {
+                    const amount = parseFloat(partialAmount);
+                    if (!amount || amount <= 0) { addToast('Ingresa un monto válido', 'error'); return; }
                     
-                    if (Math.abs((cash + transfer) - order.price) > 1) { 
-                         addToast('La suma de pagos no coincide con el total', 'error');
-                         return;
+                    const currentPaid = order.amountPaid || 0;
+                    const remaining = order.price - currentPaid;
+
+                    // Evitar cobrar más de lo que se debe
+                    if (amount > remaining) { addToast(`El monto excede la deuda ($${remaining})`, 'error'); return; }
+
+                    newHistoryItem.amount = amount;
+                    newHistoryItem.method = 'cash'; // Asumimos efectivo para la seña
+                    newHistoryItem.isPartial = true;
+
+                    const totalPaidNow = currentPaid + amount;
+                    
+                    finalUpdates = {
+                        amountPaid: totalPaidNow,
+                        paymentHistory: [...(order.paymentHistory || []), newHistoryItem]
+                    };
+
+                    // Si con este pago completa el total (con un margen de error de $1), marcamos como pagado
+                    if (totalPaidNow >= order.price - 1) { 
+                        isFullPayment = true;
+                        finalUpdates.paid = true;
+                        finalUpdates.paymentDate = now;
+                        finalUpdates.paymentMethod = 'history'; 
                     }
 
-                    updates.paymentDetails = { cash, transfer };
+                } else {
+                    // --- CASO 2: PAGO TOTAL (Efectivo / Digital / Mixto) ---
+                    isFullPayment = true;
+                    const remaining = order.price - (order.amountPaid || 0);
+                    
+                    if (method === 'mixed') {
+                        const cash = parseFloat(mixedAmounts.cash) || 0;
+                        const transfer = parseFloat(mixedAmounts.transfer) || 0;
+                        
+                        // Validación: la suma debe coincidir con lo que falta pagar
+                        if (Math.abs((cash + transfer) - remaining) > 1) { 
+                             addToast('La suma no coincide con el restante', 'error');
+                             return;
+                        }
+                        newHistoryItem.amount = remaining;
+                        newHistoryItem.paymentDetails = { cash, transfer };
+                    } else {
+                        newHistoryItem.amount = remaining;
+                    }
+                    
+                    finalUpdates = {
+                        paid: true,
+                        paymentMethod: method,
+                        paymentDate: now,
+                        paymentDetails: method === 'mixed' ? { cash: parseFloat(mixedAmounts.cash), transfer: parseFloat(mixedAmounts.transfer) } : null,
+                        amountPaid: order.price, // Se asume pagado total
+                        paymentHistory: [...(order.paymentHistory || []), newHistoryItem]
+                    };
                 }
-                
+
                 try {
-                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', pendingPaymentId), updates);
+                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', pendingPaymentId), finalUpdates);
                     setIsPaymentModalOpen(false);
-                    addToast('Pago registrado correctamente');
+                    setPartialAmount(''); // Limpiar el campo
+                    addToast(isFullPayment ? '¡Pedido pagado totalmente!' : 'Pago parcial registrado');
                 } catch (error) {
                     console.error(error);
                     addToast('Error al registrar el cobro', 'error');
                 }
             };
-
             const handleDeliveryConfirm = async () => {
                 await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', pendingDeliveryId), { 
                     delivered: true, deliveryDate: deliveryDateInput ? new Date(deliveryDateInput).toISOString() : new Date().toISOString() 
@@ -1272,19 +1361,35 @@ const handleDoneConfirm = async () => {
                                                 <div className="pl-[4.5rem]">
                                                     <p className="text-stone-600 text-sm mb-4 font-medium">{order.detail}</p>
                                                     
+                                                    {/* --- NUEVO: BARRA DE PROGRESO DE PAGO --- */}
+                                                    {(!order.paid && order.amountPaid > 0) && (
+                                                        <div className="mb-4 bg-stone-50 p-3 rounded-xl border border-stone-100">
+                                                            <div className="flex justify-between items-end mb-1">
+                                                                <span className="text-xs font-bold text-stone-500">Abonado: <span className="text-emerald-600">${order.amountPaid.toLocaleString()}</span></span>
+                                                                <span className="text-xs font-bold text-red-500">Resta: ${(order.price - order.amountPaid).toLocaleString()}</span>
+                                                            </div>
+                                                            <div className="w-full h-2 bg-stone-200 rounded-full overflow-hidden">
+                                                                <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${(order.amountPaid / order.price) * 100}%` }}></div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {/* ---------------------------------------- */}
+
                                                     <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-stone-50">
                                                         <div className="flex items-center gap-2">
                                                             <span className="text-xl font-bold text-stone-900 brand-font">${order.price.toLocaleString()}</span>
                                                             {order.paymentMethod && (
                                                                 <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md bg-stone-100 text-stone-500 flex items-center gap-1`}>
                                                                     {order.paymentMethod === 'cash' ? <Banknote size={10} /> : <CreditCard size={10} />}
-                                                                    {order.paymentMethod === 'mixed' ? 'Mixto' : (order.paymentMethod === 'cash' ? 'Efectivo' : 'Transf.')}
+                                                                    {order.paymentMethod === 'mixed' ? 'Mixto' : (order.paymentMethod === 'history' ? 'Parciales' : (order.paymentMethod === 'cash' ? 'Efectivo' : 'Transf.'))}
                                                                 </span>
                                                             )}
                                                         </div>
                                                         <div className="flex gap-2">
-                                                            <button onClick={() => toggleStatus(order, 'paid')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.paid ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300'}`}>
-                                                                {order.paid ? <CheckCircle2 size={14}/> : <Circle size={14}/>} {order.paid ? 'Pagado' : 'Cobrar'}
+                                                            {/* Botón de Cobrar actualizado */}
+                                                            <button onClick={() => toggleStatus(order, 'paid')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.paid ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : (order.amountPaid > 0 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300')}`}>
+                                                                {order.paid ? <CheckCircle2 size={14}/> : <Circle size={14}/>} 
+                                                                {order.paid ? 'Pagado' : (order.amountPaid > 0 ? 'Resto' : 'Cobrar')}
                                                             </button>
 
                                                             <button onClick={() => toggleStatus(order, 'done')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.done ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300'}`}>
@@ -1459,6 +1564,9 @@ const handleDoneConfirm = async () => {
             // 1. Filtramos los movimientos según el botón seleccionado
             const filteredMovements = finances.movements.filter(m => {
                 if (financeFilter === 'all') return true;
+				
+				if (financeFilter === 'expenses') return m.type === 'expense';
+				
                 const method = m.paymentMethod || m.method || 'cash';
                 
                 if (financeFilter === 'cash') return method === 'cash' || method === 'mixed';
@@ -1539,24 +1647,32 @@ const handleDoneConfirm = async () => {
                         </div>
                     </div>
 
-                    {/* BOTONES DE FILTRO CON EL NUEVO BOTÓN MIXTO */}
+                {/* BOTONES DE FILTRO CON EL NUEVO BOTÓN DE GASTOS */}
                     <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar items-center justify-end md:justify-start">
                         <span className="text-xs font-bold text-stone-400 mr-2 uppercase tracking-wide hidden md:inline">Filtrar vista:</span>
+                        
                         <button onClick={() => setFinanceFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${financeFilter === 'all' ? 'bg-stone-900 text-white border-stone-900 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
                             Todos
                         </button>
+                        
+                        {/* --- BOTÓN NUEVO ROJO (SOLO GASTOS) --- */}
+                        <button onClick={() => setFinanceFilter('expenses')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${financeFilter === 'expenses' ? 'bg-red-600 text-white border-red-600 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
+                            <ArrowDownCircle size={14}/> Solo Gastos
+                        </button>
+                        {/* -------------------------------------- */}
+
                         <button onClick={() => setFinanceFilter('cash')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${financeFilter === 'cash' ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
                             <Banknote size={14}/> Solo Efectivo
                         </button>
+                        
                         <button onClick={() => setFinanceFilter('transfer')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${financeFilter === 'transfer' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
                             <CreditCard size={14}/> Solo Digital
                         </button>
-                        {/* BOTÓN NUEVO */}
+                        
                         <button onClick={() => setFinanceFilter('mixed')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${financeFilter === 'mixed' ? 'bg-amber-600 text-white border-amber-600 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
                             <Grid size={14}/> Solo Mixto
                         </button>
                     </div>
-
                     {/* TARJETAS DE RESUMEN (DINÁMICAS) */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="glass-panel p-6 rounded-2xl shadow-sm border border-stone-200/50 bg-white">
@@ -1981,129 +2097,73 @@ const handleDoneConfirm = async () => {
                         </form>
                     </Modal>
 
-{/* --- MODAL DE ENTREGA (FALTABA ESTE CÓDIGO) --- */}
-<Modal isOpen={isDeliveryModalOpen} onClose={() => setIsDeliveryModalOpen(false)} title="Confirmar Entrega">
-    {(() => {
-        // Buscamos el pedido seleccionado
-        const order = orders.find(o => o.id === pendingDeliveryId);
-        if (!order) return null;
-
-        return (
-            <div className="space-y-6">
-                {/* Caja Azul estilo Alerta */}
-                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-4 items-start animate-in fade-in slide-in-from-top-2">
-                    <div className="bg-white p-2.5 rounded-full text-blue-600 shrink-0 shadow-sm border border-blue-100">
-                        <Truck size={22} strokeWidth={2} />
-                    </div>
-                    <div>
-                        <h4 className="font-bold text-blue-900 text-sm mb-1">Estás por entregar el pedido:</h4>
-                        <p className="text-blue-700 text-xs font-medium leading-relaxed">
-                            {order.detail}
-                        </p>
-                    </div>
-                </div>
-
-                {/* Input de Fecha y Hora */}
-                <div className="space-y-1">
-                    <label className="text-xs font-bold text-stone-500 uppercase tracking-widest ml-1">Fecha y hora de entrega</label>
-                    <div className="relative">
-                        <input 
-                            type="datetime-local" 
-                            className="w-full p-3.5 pl-10 bg-stone-50 border border-stone-200 rounded-xl focus:border-stone-400 outline-none font-medium text-stone-700 shadow-sm transition-all"
-                            value={deliveryDateInput} 
-                            onChange={(e) => setDeliveryDateInput(e.target.value)} 
-                        />
-                        <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
-                    </div>
-                    <p className="text-[10px] text-stone-400 mt-1 pl-1">Dejar como está para usar fecha actual.</p>
-                </div>
-
-                {/* Botones de Acción */}
-                <div className="flex gap-3 pt-2">
-                    <button 
-                        onClick={() => setIsDeliveryModalOpen(false)} 
-                        className="flex-1 py-3.5 rounded-xl font-bold bg-stone-100 text-stone-600 hover:bg-stone-200 transition-colors"
-                    >
-                        Cancelar
-                    </button>
-                    <button 
-                        onClick={handleDeliveryConfirm} 
-                        className="flex-1 py-3.5 rounded-xl font-bold bg-stone-900 text-white hover:bg-stone-800 transition-colors shadow-lg shadow-stone-900/20 active:scale-95 transform duration-100"
-                    >
-                        Confirmar Entrega
-                    </button>
-                </div>
-            </div>
-        );
-    })()}
-</Modal>
-
-                   <Modal isOpen={isPaymentModalOpen} onClose={() => setIsPaymentModalOpen(false)} title="Registrar Cobro">
-    {paymentModalStep === 'select' ? (
-        <div className="space-y-3">
-            <p className="text-sm text-center text-stone-500 mb-4">Selecciona el método de pago</p>
-            <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => handleConfirmPayment('cash')} className="flex flex-col items-center p-6 bg-stone-50 border border-stone-200 rounded-2xl hover:bg-emerald-50 hover:border-emerald-200 transition-all group"><div className="bg-white p-3 rounded-full mb-3 shadow-sm group-hover:scale-110 transition-transform"><Banknote size={24} className="text-stone-700"/></div><span className="font-bold text-stone-700">Efectivo</span></button>
-                <button onClick={() => handleConfirmPayment('transfer')} className="flex flex-col items-center p-6 bg-stone-50 border border-stone-200 rounded-2xl hover:bg-blue-50 hover:border-blue-200 transition-all group"><div className="bg-white p-3 rounded-full mb-3 shadow-sm group-hover:scale-110 transition-transform"><CreditCard size={24} className="text-stone-700"/></div><span className="font-bold text-stone-700">Digital</span></button>
-            </div>
-            <button onClick={() => setPaymentModalStep('mixed')} className="w-full py-4 text-stone-500 font-bold hover:text-stone-800">Pago Mixto</button>
-        </div>
-    ) : (
-        <div className="space-y-4">
-            {/* LÓGICA DE CALCULO AUTOMÁTICO */}
-            {(() => {
-                const totalOrderPrice = orders.find(o => o.id === pendingPaymentId)?.price || 0;
-                
-                return (
-                    <>
-                        <div className="bg-stone-900 text-white p-4 rounded-xl text-center">
-                            <p className="text-xs uppercase font-bold text-stone-400">Total a Cobrar</p>
-                            <p className="text-2xl font-bold">${totalOrderPrice.toLocaleString()}</p>
-                        </div>
-                        
-                        <div>
-                            <label className="text-xs font-bold text-stone-500 uppercase">Monto Efectivo</label>
-                            <input 
-                                type="number" 
-                                className="w-full p-3 border rounded-xl font-bold" 
-                                autoFocus 
-                                value={mixedAmounts.cash} 
-                                onChange={e => {
-                                    const val = e.target.value;
-                                    const numVal = parseFloat(val) || 0;
-                                    // Calculamos el resto automáticamente
-                                    const remaining = Math.max(0, totalOrderPrice - numVal);
-                                    setMixedAmounts({ cash: val, transfer: remaining });
-                                }} 
-                            />
-                        </div>
-                        
-                        <div>
-                            <label className="text-xs font-bold text-stone-500 uppercase">Monto Digital</label>
-                            <input 
-                                type="number" 
-                                className="w-full p-3 border rounded-xl font-bold" 
-                                value={mixedAmounts.transfer} 
-                                onChange={e => {
-                                    const val = e.target.value;
-                                    const numVal = parseFloat(val) || 0;
-                                    // Calculamos el resto automáticamente hacia el otro lado
-                                    const remaining = Math.max(0, totalOrderPrice - numVal);
-                                    setMixedAmounts({ cash: remaining, transfer: val });
-                                }} 
-                            />
-                        </div>
-                        
-                        <div className="flex gap-3">
-                            <button onClick={() => setPaymentModalStep('select')} className="flex-1 py-3 font-bold text-stone-500">Volver</button>
-                            <button onClick={() => handleConfirmPayment('mixed')} className="flex-[2] bg-amber-600 text-white font-bold rounded-xl">Confirmar</button>
-                        </div>
-                    </>
-                );
-            })()}
-        </div>
-    )}
-</Modal>
+<Modal isOpen={isPaymentModalOpen} onClose={() => setIsPaymentModalOpen(false)} title="Registrar Cobro">
+                        {paymentModalStep === 'select' ? (
+                            <div className="space-y-3">
+                                {(() => {
+                                    const order = orders.find(o => o.id === pendingPaymentId);
+                                    const remaining = order ? (order.price - (order.amountPaid || 0)) : 0;
+                                    return (
+                                        <>
+                                            <div className="text-center mb-4">
+                                                <p className="text-stone-400 text-xs uppercase font-bold">Resta por cobrar</p>
+                                                <p className="text-3xl font-bold text-stone-800">${remaining.toLocaleString()}</p>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <button onClick={() => handleConfirmPayment('cash')} className="flex flex-col items-center p-4 bg-emerald-50 border border-emerald-100 rounded-2xl hover:bg-emerald-100 transition-all group">
+                                                    <Banknote size={24} className="text-emerald-600 mb-2"/>
+                                                    <span className="font-bold text-emerald-800 text-sm">Efectivo Total</span>
+                                                </button>
+                                                <button onClick={() => handleConfirmPayment('transfer')} className="flex flex-col items-center p-4 bg-blue-50 border border-blue-100 rounded-2xl hover:bg-blue-100 transition-all group">
+                                                    <CreditCard size={24} className="text-blue-600 mb-2"/>
+                                                    <span className="font-bold text-blue-800 text-sm">Digital Total</span>
+                                                </button>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3 pt-2">
+                                                 <button onClick={() => setPaymentModalStep('mixed')} className="py-3 px-4 bg-stone-100 rounded-xl text-stone-600 font-bold text-xs hover:bg-stone-200">Pago Mixto</button>
+                                                 <button onClick={() => setPaymentModalStep('partial')} className="py-3 px-4 bg-amber-100 text-amber-700 border border-amber-200 rounded-xl font-bold text-xs hover:bg-amber-200 flex items-center justify-center gap-2"><PieChart size={14}/> Pago Parcial</button>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                        ) : paymentModalStep === 'partial' ? (
+                            <div className="space-y-4 animate-in slide-in-from-right-4">
+                                {(() => {
+                                    const order = orders.find(o => o.id === pendingPaymentId);
+                                    const remaining = order ? (order.price - (order.amountPaid || 0)) : 0;
+                                    return (
+                                        <>
+                                            <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl">
+                                                <p className="text-amber-800 text-xs font-bold uppercase mb-1">Deuda Actual</p>
+                                                <p className="text-2xl font-bold text-amber-600">${remaining.toLocaleString()}</p>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs font-bold text-stone-500 uppercase">Monto a abonar ahora</label>
+                                                <input type="number" autoFocus className="w-full p-4 text-xl font-bold border rounded-xl mt-1 focus:ring-2 focus:ring-amber-500/20 outline-none" placeholder="$0" value={partialAmount} onChange={e => setPartialAmount(e.target.value)} />
+                                            </div>
+                                            <div className="flex gap-3 pt-2">
+                                                <button onClick={() => setPaymentModalStep('select')} className="flex-1 py-3 font-bold text-stone-500 bg-stone-100 rounded-xl">Volver</button>
+                                                <button onClick={() => handleConfirmPayment('partial')} className="flex-[2] bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-lg shadow-amber-900/20">Registrar Entrega</button>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <p className="text-sm text-stone-500 font-bold text-center">Pago Mixto (Total Restante)</p>
+                                <div className="grid grid-cols-2 gap-4">
+                                     <div><label className="text-[10px] uppercase font-bold text-stone-400">Efectivo</label><input type="number" className="w-full p-3 border rounded-xl" value={mixedAmounts.cash} onChange={e => setMixedAmounts({cash:e.target.value, transfer:mixedAmounts.transfer})} /></div>
+                                     <div><label className="text-[10px] uppercase font-bold text-stone-400">Digital</label><input type="number" className="w-full p-3 border rounded-xl" value={mixedAmounts.transfer} onChange={e => setMixedAmounts({cash:mixedAmounts.cash, transfer:e.target.value})} /></div>
+                                </div>
+                                <div className="flex gap-3">
+                                    <button onClick={() => setPaymentModalStep('select')} className="flex-1 py-3 font-bold text-stone-500 bg-stone-100 rounded-xl">Volver</button>
+                                    <button onClick={() => handleConfirmPayment('mixed')} className="flex-[2] bg-stone-900 text-white font-bold rounded-xl">Confirmar</button>
+                                </div>
+                            </div>
+                        )}
+                    </Modal>
 
                     <Modal isOpen={isIncomeModalOpen} onClose={() => setIsIncomeModalOpen(false)} title={editingFinanceId ? "Editar Ingreso" : "Registrar Ingreso"}>
 						<form onSubmit={(e) => { e.preventDefault(); handleSimpleSave('extra_incomes', {...prepareFinanceData(incomeForm), type:'income'}, setIsIncomeModalOpen, setIncomeForm, {description:'', amount:'', method:'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}, editingFinanceId) }} className="space-y-5">
