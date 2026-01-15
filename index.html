@@ -2243,16 +2243,64 @@ const handleDoneConfirm = async () => {
                                 })()}
                             </div>
                         ) : (
-                            <div className="space-y-4">
-                                <p className="text-sm text-stone-500 font-bold text-center">Pago Mixto (Total Restante)</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                     <div><label className="text-[10px] uppercase font-bold text-stone-400">Efectivo</label><input type="number" className="w-full p-3 border rounded-xl" value={mixedAmounts.cash} onChange={e => setMixedAmounts({cash:e.target.value, transfer:mixedAmounts.transfer})} /></div>
-                                     <div><label className="text-[10px] uppercase font-bold text-stone-400">Digital</label><input type="number" className="w-full p-3 border rounded-xl" value={mixedAmounts.transfer} onChange={e => setMixedAmounts({cash:mixedAmounts.cash, transfer:e.target.value})} /></div>
-                                </div>
-                                <div className="flex gap-3">
-                                    <button onClick={() => setPaymentModalStep('select')} className="flex-1 py-3 font-bold text-stone-500 bg-stone-100 rounded-xl">Volver</button>
-                                    <button onClick={() => handleConfirmPayment('mixed')} className="flex-[2] bg-stone-900 text-white font-bold rounded-xl">Confirmar</button>
-                                </div>
+                        <div className="space-y-4">
+                                {(() => {
+                                    // 1. CALCULAMOS EL TOTAL QUE FALTA PAGAR
+                                    const order = orders.find(o => o.id === pendingPaymentId);
+                                    const remaining = order ? (order.price - (order.amountPaid || 0)) : 0;
+
+                                    // 2. AL CAMBIAR EFECTIVO -> SE AJUSTA DIGITAL
+                                    const handleCashChange = (e) => {
+                                        const val = e.target.value;
+                                        const numCash = val === '' ? 0 : parseFloat(val);
+                                        // Lo que falta se va a digital (sin ser negativo)
+                                        const newTransfer = Math.max(0, remaining - numCash); 
+                                        setMixedAmounts({ cash: val, transfer: newTransfer });
+                                    };
+
+                                    // 3. AL CAMBIAR DIGITAL -> SE AJUSTA EFECTIVO
+                                    const handleTransferChange = (e) => {
+                                        const val = e.target.value;
+                                        const numTransfer = val === '' ? 0 : parseFloat(val);
+                                        // Lo que falta se va a efectivo (sin ser negativo)
+                                        const newCash = Math.max(0, remaining - numTransfer);
+                                        setMixedAmounts({ cash: newCash, transfer: val });
+                                    };
+
+                                    return (
+                                        <>
+                                            <p className="text-sm text-stone-500 font-bold text-center">
+                                                Pago Mixto (Total Restante: ${remaining.toLocaleString()})
+                                            </p>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="text-[10px] uppercase font-bold text-stone-400">Efectivo</label>
+                                                    <input 
+                                                        type="number" 
+                                                        className="w-full p-3 border rounded-xl font-bold text-stone-800" 
+                                                        value={mixedAmounts.cash} 
+                                                        onChange={handleCashChange} 
+                                                        placeholder="$0"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] uppercase font-bold text-stone-400">Digital</label>
+                                                    <input 
+                                                        type="number" 
+                                                        className="w-full p-3 border rounded-xl font-bold text-stone-800" 
+                                                        value={mixedAmounts.transfer} 
+                                                        onChange={handleTransferChange} 
+                                                        placeholder="$0"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-3">
+                                                <button onClick={() => setPaymentModalStep('select')} className="flex-1 py-3 font-bold text-stone-500 bg-stone-100 rounded-xl">Volver</button>
+                                                <button onClick={() => handleConfirmPayment('mixed')} className="flex-[2] bg-stone-900 text-white font-bold rounded-xl">Confirmar</button>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
                             </div>
                         )}
                     </Modal>
