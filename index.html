@@ -111,19 +111,19 @@
         // --- FIREBASE SETUP ---
         import { initializeApp } from "firebase/app";
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-        import { getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDoc } from "firebase/firestore";
+       import { getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDoc, getDocs, where } from "firebase/firestore";
 
         // ==========================================
         // CONFIGURACIÓN OSIRIS
         // ==========================================
-        const localConfig = {
-          apiKey: "AIzaSyBySeGvkm4FmyDlP_Jh08TRhJiP1Qf7SXw",
-          authDomain: "osiris-42dac.firebaseapp.com",
-          projectId: "osiris-42dac",
-          storageBucket: "osiris-42dac.firebasestorage.app",
-          messagingSenderId: "511429334828",
-          appId: "1:511429334828:web:6cdb5fd8de60610c0a3e89",
-          measurementId: "G-ZYRJ71P9SE"
+       const localConfig = {
+            apiKey: "AIzaSyBySeGvkm4FmyDlP_Jh08TRhJiP1Qf7SXw",
+            authDomain: "osiris-42dac.firebaseapp.com",
+            projectId: "osiris-42dac",
+            storageBucket: "osiris-42dac.firebasestorage.app",
+            messagingSenderId: "511429334828",
+            appId: "1:511429334828:web:6cdb5fd8de60610c0a3e89",
+            measurementId: "G-ZYRJ71P9SE"
         };
 
         let firebaseConfig;
@@ -284,24 +284,35 @@
             </div>
         );
 
-        const LoginScreen = ({ onLogin, credentials }) => {
+    // --- COPIA Y PEGA ESTE BLOQUE NUEVO ---
+        const LoginScreen = ({ onLogin }) => {
             const [username, setUsername] = useState('');
             const [password, setPassword] = useState('');
             const [error, setError] = useState('');
             const [isLoading, setIsLoading] = useState(false);
 
-            const handleSubmit = (e) => {
+            const handleSubmit = async (e) => {
                 e.preventDefault();
                 setError('');
                 setIsLoading(true);
-                setTimeout(() => {
-                    if (username === credentials.user && password === credentials.pass) {
-                        onLogin();
+
+                try {
+                    // Aquí es donde consultamos a tu Base de Datos real
+                    const usersRef = collection(db, "app_users");
+                    const q = query(usersRef, where("username", "==", username), where("password", "==", password));
+                    const snapshot = await getDocs(q);
+
+                    if (!snapshot.empty) {
+                        onLogin(password); // ¡Éxito!
                     } else {
-                        setError('Credenciales inválidas');
-                        setIsLoading(false);
+                        setError('Usuario o contraseña incorrectos');
                     }
-                }, 800);
+                } catch (err) {
+                    console.error(err);
+                    setError('Error de conexión con la base de datos');
+                } finally {
+                    setIsLoading(false);
+                }
             };
 
             return (
@@ -323,46 +334,29 @@
                         <form onSubmit={handleSubmit} className="space-y-4 bg-white/5 p-8 rounded-2xl backdrop-blur-sm border border-white/10 shadow-2xl">
                             <div className="space-y-1">
                                 <label className="text-xs font-bold text-stone-500 uppercase tracking-widest ml-1">Usuario</label>
-                                <input 
-                                    type="text" 
-                                    className="w-full px-4 py-3 bg-stone-900/50 border border-stone-800 rounded-lg text-white focus:border-amber-600 focus:ring-1 focus:ring-amber-600 outline-none transition-all placeholder:text-stone-700"
-                                    placeholder="Usuario" 
-                                    value={username} 
-                                    onChange={(e) => setUsername(e.target.value)} 
-                                    autoFocus 
-                                />
+                                <input type="text" className="w-full px-4 py-3 bg-stone-900/50 border border-stone-800 rounded-lg text-white focus:border-amber-600 focus:ring-1 focus:ring-amber-600 outline-none transition-all placeholder:text-stone-700" placeholder="Usuario" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-bold text-stone-500 uppercase tracking-widest ml-1">Contraseña</label>
-                                <input 
-                                    type="password" 
-                                    className="w-full px-4 py-3 bg-stone-900/50 border border-stone-800 rounded-lg text-white focus:border-amber-600 focus:ring-1 focus:ring-amber-600 outline-none transition-all placeholder:text-stone-700"
-                                    placeholder="••••••••" 
-                                    value={password} 
-                                    onChange={(e) => setPassword(e.target.value)} 
-                                />
+                                <input type="password" className="w-full px-4 py-3 bg-stone-900/50 border border-stone-800 rounded-lg text-white focus:border-amber-600 focus:ring-1 focus:ring-amber-600 outline-none transition-all placeholder:text-stone-700" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
                             </div>
                             {error && <div className="text-red-400 text-xs font-medium text-center py-2 animate-pulse">{error}</div>}
-                            
-                            <button 
-                                type="submit" 
-                                disabled={isLoading}
-                                className="w-full bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white py-3.5 rounded-lg font-medium shadow-lg transition-all active:scale-95 disabled:opacity-70 mt-2 tracking-wide"
-                            >
+                            <button type="submit" disabled={isLoading} className="w-full bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white py-3.5 rounded-lg font-medium shadow-lg transition-all active:scale-95 disabled:opacity-70 mt-2 tracking-wide">
                                 {isLoading ? <Loader2 size={20} className="animate-spin mx-auto" /> : 'INGRESAR'}
                             </button>
                         </form>
                         
-                        {/* FIRMA DEVELOPER */}
                         <div className="text-center mt-10 space-y-1">
                             <p className="text-stone-600 text-[10px]">© {new Date().getFullYear()} Osiris Management System</p>
-                            <p className="text-stone-700 text-[10px] font-medium opacity-60 hover:opacity-100 transition-opacity cursor-default">Powered by JA • Javier Amado • javieramado91@gmail.com</p>
+                            <p className="text-stone-700 text-[10px] font-medium opacity-60 hover:opacity-100 transition-opacity cursor-default">Powered by JA</p>
                         </div>
                     </div>
                 </div>
             );
         };
 
+     
+       
         // Modal Actualizado para aceptar maxWidth
         const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
             if (!isOpen) return null;
@@ -395,9 +389,9 @@
                         </div>
                     </div>
                 </div>
-            );
+           );  // <--- AGREGAR ESTO (Paréntesis y punto y coma)
         };
-
+		
         const Toast = ({ message, type, onClose }) => {
             useEffect(() => { const t = setTimeout(onClose, 4000); return () => clearTimeout(t); }, [onClose]);
             return (
@@ -423,13 +417,10 @@
             );
         };
 
-        const OsirisApp = () => {
-            // Estado y Configuración
-            const [isLocked, setIsLocked] = useState(true);
-            const [credentials, setCredentials] = useState(() => {
-                const saved = localStorage.getItem('osiris_credentials');
-                return saved ? JSON.parse(saved) : { user: 'Osiris', pass: '1993' };
-            });
+      const OsirisApp = () => {
+        // Estado y Configuración
+        const [isLocked, setIsLocked] = useState(true);
+        // (Credenciales borradas para seguridad)
             const [activeTab, setActiveTab] = useState('orders'); // orders, debts, finances, stats, clients, suppliers
             const [user, setUser] = useState(null);
             
@@ -523,10 +514,13 @@
             const [isSaving, setIsSaving] = useState(false);
             const [connectionStatus, setConnectionStatus] = useState('checking');
 			const [financeFilter, setFinanceFilter] = useState('all');
-            // --- AUTH & INIT ---
+   
+              // --- AUTH & INIT ---
             useEffect(() => {
                 const savedAuth = localStorage.getItem('osiris_auth_token');
-                if (savedAuth === `valid_${credentials.pass}`) setIsLocked(false);
+                
+                // ✅ ESTA ES LA CORRECCIÓN: Usamos 'valid_session'
+                if (savedAuth === 'valid_session') setIsLocked(false);
 
                 if (!isConfigured) return;
                 const initAuth = async () => {
@@ -588,8 +582,8 @@
             };
             const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
 
-            const handleLogin = () => {
-                localStorage.setItem('osiris_auth_token', `valid_${credentials.pass}`);
+            const handleLogin = (pass) => {
+                localStorage.setItem('osiris_auth_token', 'valid_session');
                 setIsLocked(false);
             };
 
@@ -600,11 +594,7 @@
 
             const handleUpdateCredentials = (e) => {
                 e.preventDefault();
-                if (!tempCredentials.user || !tempCredentials.pass) { addToast('Completa los campos', 'error'); return; }
-                setCredentials(tempCredentials);
-                localStorage.setItem('osiris_credentials', JSON.stringify(tempCredentials));
-                localStorage.setItem('osiris_auth_token', `valid_${tempCredentials.pass}`);
-                addToast('Credenciales actualizadas');
+                alert("Para seguridad, la gestión de usuarios se realiza únicamente desde la consola de Firebase.");
                 setIsSettingsOpen(false);
             };
 
@@ -1273,7 +1263,8 @@ const handleDoneConfirm = async () => {
             };
 
             if (!isConfigured) return <ConfigErrorScreen />;
-            if (isLocked) return <LoginScreen onLogin={handleLogin} credentials={credentials} />;
+      
+			if (isLocked) return <LoginScreen onLogin={handleLogin} />;
 
             return (
                 <div className="h-full w-full flex flex-col md:flex-row bg-[#f5f5f4] text-stone-800 overflow-hidden">
