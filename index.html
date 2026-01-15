@@ -471,6 +471,8 @@
             const [mixedAmounts, setMixedAmounts] = useState({ cash: 0, transfer: 0 });
 			const [partialAmount, setPartialAmount] = useState('');
 
+			const [partialMethod, setPartialMethod] = useState('cash');
+
             const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
             const [pendingDeliveryId, setPendingDeliveryId] = useState(null);
             const [deliveryDateInput, setDeliveryDateInput] = useState('');
@@ -993,7 +995,7 @@
                     if (amount > remaining) { addToast(`El monto excede la deuda ($${remaining})`, 'error'); return; }
 
                     newHistoryItem.amount = amount;
-                    newHistoryItem.method = 'cash'; // Asumimos efectivo para la seña
+                    newHistoryItem.method = partialMethod; // <--- AQUÍ ESTÁ EL CAMBIO
                     newHistoryItem.isPartial = true;
 
                     const totalPaidNow = currentPaid + amount;
@@ -1158,11 +1160,17 @@ const handleDoneConfirm = async () => {
 
             // MODIFICADO: Funciones para editar finanzas y soportar mixto
             const handleEditFinance = (item) => {
+                // LÓGICA DE SEGURIDAD PARA PEDIDOS
+                if (item.source === 'orders') {
+                    addToast('Para editar un cobro de pedido, elimínalo (tacho rojo) y cárgalo nuevamente.', 'info');
+                    return;
+                }
+
+                // LÓGICA NORMAL PARA GASTOS E INGRESOS EXTRA
                 const isExp = item.source === 'expenses';
                 const formSetter = isExp ? setExpenseForm : setIncomeForm;
                 const modalSetter = isExp ? setIsExpenseModalOpen : setIsIncomeModalOpen;
                 
-                // Extraer detalles si existen
                 const pDetails = item.paymentDetails || { cash: '', transfer: '' };
                 const method = item.paymentMethod || item.method || 'cash';
                 
@@ -1178,9 +1186,72 @@ const handleDoneConfirm = async () => {
                 modalSetter(true);
             };
 
-            const handleDeleteFinance = (item) => {
-                if (item.source === 'expenses') handleDelete('expenses', item.id);
-                if (item.source === 'extra_incomes') handleDelete('extra_incomes', item.id);
+    const handleDeleteFinance = (item) => {
+                // 1. Si es Gasto o Ingreso Extra (fácil)
+                if (item.source === 'expenses') { handleDelete('expenses', item.id); return; }
+                if (item.source === 'extra_incomes') { handleDelete('extra_incomes', item.id); return; }
+
+                // 2. Si es un Pago de Pedido (complejo)
+                if (item.source === 'orders') {
+                    setConfirmModal({
+                        isOpen: true, 
+                        title: 'Eliminar Pago', 
+                        message: 'Se eliminará este pago y el saldo volverá a sumarse a la deuda del pedido. ¿Confirmar?', 
+                        isDanger: true, 
+                        confirmText: 'Eliminar Pago',
+                        onConfirm: async () => {
+                            try {
+                                // Detectar si es un pago del historial nuevo (tiene ID compuesto con _pay_)
+                                const isHistoryItem = item.id.includes('_pay_');
+                                const realOrderId = isHistoryItem ? item.id.split('_pay_')[0] : item.id;
+                                const order = orders.find(o => o.id === realOrderId);
+                                
+                                if (!order) { addToast('Pedido no encontrado', 'error'); return; }
+
+                                let updates = {};
+
+                                if (isHistoryItem) {
+                                    // Es un pago parcial o total del sistema nuevo
+                                    const index = parseInt(item.id.split('_pay_')[1]);
+                                    
+                                    // Filtramos el historial para quitar SOLO este pago
+                                    const newHistory = order.paymentHistory.filter((_, i) => i !== index);
+                                    
+                                    // Recalculamos cuánto se pagó en total sumando lo que queda
+                                    const newTotalPaid = newHistory.reduce((acc, curr) => acc + curr.amount, 0);
+
+                                    // Definimos si sigue pagado o no (con margen de error de $1 por decimales)
+                                    const isStillPaid = newTotalPaid >= (order.price - 1);
+
+                                    updates = {
+                                        paymentHistory: newHistory,
+                                        amountPaid: newTotalPaid,
+                                        paid: isStillPaid,
+                                        // Si al borrar deja de estar pagado, limpiamos fecha y metodo principal
+                                        paymentDate: isStillPaid ? order.paymentDate : null, 
+                                        paymentMethod: isStillPaid ? 'history' : null
+                                    };
+                                } else {
+                                    // Es un pago del sistema antiguo (sin historial)
+                                    updates = {
+                                        paid: false,
+                                        amountPaid: 0,
+                                        paymentDate: null,
+                                        paymentMethod: null,
+                                        paymentDetails: null,
+                                        paymentHistory: []
+                                    };
+                                }
+
+                                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', realOrderId), updates);
+                                addToast('Pago eliminado. Deuda actualizada.');
+                            } catch (e) {
+                                console.error(e);
+                                addToast('Error al eliminar pago', 'error');
+                            }
+                        }
+                    });
+                }
             };
 
             // Función Helper para guardar finanzas con lógica de pago mixto
@@ -1724,13 +1795,11 @@ const handleDoneConfirm = async () => {
                                             </td>
                                             <td className={`px-6 py-3.5 text-right font-bold ${m.type === 'income' ? 'text-emerald-600' : 'text-red-500'}`}>{m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}</td>
                                             <td className="px-6 py-3.5 text-right">
-                                                {(m.source === 'expenses' || m.source === 'extra_incomes') && (
-                                                    <div className="flex justify-end gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
-                                                        <button onClick={() => handleEditFinance(m)} className="p-1.5 hover:bg-stone-100 rounded text-stone-500"><Pencil size={14}/></button>
-                                                        <button onClick={() => handleDeleteFinance(m)} className="p-1.5 hover:bg-red-50 rounded text-red-500"><Trash2 size={14}/></button>
-                                                    </div>
-                                                )}
-                                            </td>
+    <div className="flex justify-end gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
+        <button onClick={() => handleEditFinance(m)} className="p-1.5 hover:bg-stone-100 rounded text-stone-500"><Pencil size={14}/></button>
+        <button onClick={() => handleDeleteFinance(m)} className="p-1.5 hover:bg-red-50 rounded text-red-500"><Trash2 size={14}/></button>
+    </div>
+</td>
                                         </tr>
                                     ))}
                                     {filteredMovements.length === 0 && <tr><td colSpan="4" className="px-6 py-8 text-center text-stone-400">No hay movimientos con este filtro</td></tr>}
@@ -1738,6 +1807,7 @@ const handleDoneConfirm = async () => {
                             </table>
                         </div>
 
+                        {/* Vista Móvil: Cards */}
                         {/* Vista Móvil: Cards */}
                         <div className="md:hidden p-4 space-y-3">
                             {filteredMovements.map((m, i) => (
@@ -1752,12 +1822,12 @@ const handleDoneConfirm = async () => {
                                     </div>
                                     <div className="text-right">
                                         <p className={`text-lg font-bold ${m.type === 'income' ? 'text-emerald-600' : 'text-red-500'}`}>{m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}</p>
-                                        {(m.source === 'expenses' || m.source === 'extra_incomes') && (
-                                            <div className="flex justify-end gap-2 mt-2">
-                                                <button onClick={() => handleEditFinance(m)} className="text-stone-400 hover:text-stone-600"><Pencil size={16}/></button>
-                                                <button onClick={() => handleDeleteFinance(m)} className="text-stone-400 hover:text-red-500"><Trash2 size={16}/></button>
-                                            </div>
-                                        )}
+                                        
+                                        {/* BOTONES VISIBLES SIEMPRE (SIN IF) */}
+                                        <div className="flex justify-end gap-2 mt-2">
+                                            <button onClick={() => handleEditFinance(m)} className="text-stone-400 hover:text-stone-600"><Pencil size={16}/></button>
+                                            <button onClick={() => handleDeleteFinance(m)} className="text-stone-400 hover:text-red-500"><Trash2 size={16}/></button>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
@@ -2121,7 +2191,7 @@ const handleDoneConfirm = async () => {
                                             </div>
                                             <div className="grid grid-cols-2 gap-3 pt-2">
                                                  <button onClick={() => setPaymentModalStep('mixed')} className="py-3 px-4 bg-stone-100 rounded-xl text-stone-600 font-bold text-xs hover:bg-stone-200">Pago Mixto</button>
-                                                 <button onClick={() => setPaymentModalStep('partial')} className="py-3 px-4 bg-amber-100 text-amber-700 border border-amber-200 rounded-xl font-bold text-xs hover:bg-amber-200 flex items-center justify-center gap-2"><PieChart size={14}/> Pago Parcial</button>
+                                               <button onClick={() => { setPaymentModalStep('partial'); setPartialMethod('cash'); }} className="py-3 px-4 bg-amber-100 text-amber-700 border border-amber-200 rounded-xl font-bold text-xs hover:bg-amber-200 flex items-center justify-center gap-2"><PieChart size={14}/> Pago Parcial</button>
                                             </div>
                                         </>
                                     );
@@ -2133,21 +2203,43 @@ const handleDoneConfirm = async () => {
                                     const order = orders.find(o => o.id === pendingPaymentId);
                                     const remaining = order ? (order.price - (order.amountPaid || 0)) : 0;
                                     return (
-                                        <>
-                                            <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl">
-                                                <p className="text-amber-800 text-xs font-bold uppercase mb-1">Deuda Actual</p>
-                                                <p className="text-2xl font-bold text-amber-600">${remaining.toLocaleString()}</p>
-                                            </div>
-                                            <div>
-                                                <label className="text-xs font-bold text-stone-500 uppercase">Monto a abonar ahora</label>
-                                                <input type="number" autoFocus className="w-full p-4 text-xl font-bold border rounded-xl mt-1 focus:ring-2 focus:ring-amber-500/20 outline-none" placeholder="$0" value={partialAmount} onChange={e => setPartialAmount(e.target.value)} />
-                                            </div>
-                                            <div className="flex gap-3 pt-2">
-                                                <button onClick={() => setPaymentModalStep('select')} className="flex-1 py-3 font-bold text-stone-500 bg-stone-100 rounded-xl">Volver</button>
-                                                <button onClick={() => handleConfirmPayment('partial')} className="flex-[2] bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-lg shadow-amber-900/20">Registrar Entrega</button>
-                                            </div>
-                                        </>
-                                    );
+    <>
+        {/* 1. Cuadro de Deuda (YA LO TIENES) */}
+        <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl">
+            <p className="text-amber-800 text-xs font-bold uppercase mb-1">Deuda Actual</p>
+            <p className="text-2xl font-bold text-amber-600">${remaining.toLocaleString()}</p>
+        </div>
+
+        {/* 2. BOTONES DE SELECCIÓN (ESTO ES LO NUEVO QUE AGREGAMOS) */}
+        <div className="grid grid-cols-2 gap-2">
+            <button 
+                onClick={() => setPartialMethod('cash')} 
+                className={`py-3 rounded-xl font-bold text-sm border transition-all ${partialMethod === 'cash' ? 'bg-emerald-100 text-emerald-700 border-emerald-200 ring-2 ring-emerald-500/20' : 'bg-white text-stone-400 border-stone-200'}`}
+            >
+                <Banknote size={16} className="inline mr-2 mb-0.5"/> Efectivo
+            </button>
+            <button 
+                onClick={() => setPartialMethod('transfer')} 
+                className={`py-3 rounded-xl font-bold text-sm border transition-all ${partialMethod === 'transfer' ? 'bg-blue-100 text-blue-700 border-blue-200 ring-2 ring-blue-500/20' : 'bg-white text-stone-400 border-stone-200'}`}
+            >
+                <CreditCard size={16} className="inline mr-2 mb-0.5"/> Digital
+            </button>
+        </div>
+        {/* -------------------------------------------------------- */}
+
+        {/* 3. Input de Monto (YA LO TIENES) */}
+        <div>
+            <label className="text-xs font-bold text-stone-500 uppercase">Monto a abonar ahora</label>
+            <input type="number" autoFocus className="w-full p-4 text-xl font-bold border rounded-xl mt-1 focus:ring-2 focus:ring-amber-500/20 outline-none" placeholder="$0" value={partialAmount} onChange={e => setPartialAmount(e.target.value)} />
+        </div>
+        
+        {/* 4. Botones de Acción (YA LO TIENES) */}
+        <div className="flex gap-3 pt-2">
+            <button onClick={() => setPaymentModalStep('select')} className="flex-1 py-3 font-bold text-stone-500 bg-stone-100 rounded-xl">Volver</button>
+            <button onClick={() => handleConfirmPayment('partial')} className="flex-[2] bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-lg shadow-amber-900/20">Registrar Entrega</button>
+        </div>
+    </>
+);
                                 })()}
                             </div>
                         ) : (
