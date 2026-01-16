@@ -90,7 +90,7 @@
 <body class="text-stone-800 h-screen w-screen overflow-hidden">
     <div id="root" class="h-full w-full"></div>
 
-    <script type="text/babel" data-type="module">
+  <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
         import { 
@@ -105,9 +105,9 @@
             Truck, Phone, Mail, ArrowUpCircle, ArrowDownCircle, 
             Clock, Edit3, Crown, Layers, Scissors, Shirt, Users,
             Package, FileText, ClipboardList, ChevronDown, ChevronUp,
-            CalendarClock, Menu, Grid, ShoppingCart
+            CalendarClock, Menu, Grid, ShoppingCart, Briefcase
         } from 'lucide-react';
-
+		
         // --- FIREBASE SETUP ---
         import { initializeApp } from "firebase/app";
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "firebase/auth";
@@ -475,7 +475,15 @@
 
             // Finance Modals States (Actualizado con mixedCash/mixedTransfer)
             const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-            const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString() });
+           const [expenseForm, setExpenseForm] = useState({ 
+    description: '', 
+    amount: '', 
+    method: 'cash', 
+    mixedCash: '', 
+    mixedTransfer: '', 
+    date: new Date().toISOString(),
+    category: 'laboral' // <--- ESTO ES LO NUEVO
+});
             const [editingFinanceId, setEditingFinanceId] = useState(null);
             
             const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
@@ -1164,13 +1172,14 @@ const handleDoneConfirm = async () => {
                 const pDetails = item.paymentDetails || { cash: '', transfer: '' };
                 const method = item.paymentMethod || item.method || 'cash';
                 
-                formSetter({ 
+              formSetter({ 
                     description: item.desc || item.description, 
                     amount: item.amount, 
                     method: method,
                     mixedCash: pDetails.cash || '',
                     mixedTransfer: pDetails.transfer || '',
-                    date: item.date 
+                    date: item.date,
+                    category: item.category || 'laboral' // <--- ESTO ES LO NUEVO
                 });
                 setEditingFinanceId(item.id);
                 modalSetter(true);
@@ -1245,13 +1254,14 @@ const handleDoneConfirm = async () => {
             };
 
             // Función Helper para guardar finanzas con lógica de pago mixto
-            const prepareFinanceData = (form) => {
+     const prepareFinanceData = (form) => {
                 const data = {
                     description: form.description,
                     amount: parseFloat(form.amount),
                     date: form.date,
                     method: form.method, // Mantener para compatibilidad
-                    paymentMethod: form.method // Estandarizar
+                    paymentMethod: form.method, // Estandarizar
+                    category: form.category || 'laboral' // <--- NUEVA LÍNEA
                 };
                 if (form.method === 'mixed') {
                     data.paymentDetails = {
@@ -1619,41 +1629,34 @@ const handleDoneConfirm = async () => {
                             )}
 
 {activeTab === 'finances' && (
-    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
         
-        {/* LÓGICA DE FILTRADO Y CÁLCULOS DINÁMICOS */}
+        {/* LÓGICA INTERNA */}
         {(() => {
-            // 1. Filtramos los movimientos según el botón seleccionado
             const filteredMovements = finances.movements.filter(m => {
                 if (financeFilter === 'all') return true;
-				
-				if (financeFilter === 'expenses') return m.type === 'expense';
-				
+                if (financeFilter === 'expenses') return m.type === 'expense';
+                if (financeFilter === 'expenses_work') return m.type === 'expense' && (m.category === 'laboral' || !m.category);
+                if (financeFilter === 'expenses_personal') return m.type === 'expense' && m.category === 'personal';
                 const method = m.paymentMethod || m.method || 'cash';
-                
                 if (financeFilter === 'cash') return method === 'cash' || method === 'mixed';
                 if (financeFilter === 'transfer') return method === 'transfer' || method === 'mixed';
-                if (financeFilter === 'mixed') return method === 'mixed'; // <--- NUEVO FILTRO
+                if (financeFilter === 'mixed') return method === 'mixed';
                 return true;
             });
 
-            // 2. Calculamos el Balance de la VISTA ACTUAL
-            const currentViewIncome = filteredMovements
-                .filter(m => m.type === 'income')
-                .reduce((acc, m) => acc + m.amount, 0);
-
-            const currentViewExpense = filteredMovements
-                .filter(m => m.type === 'expense')
-                .reduce((acc, m) => acc + m.amount, 0);
-
+            const currentViewIncome = filteredMovements.filter(m => m.type === 'income').reduce((acc, m) => acc + m.amount, 0);
+            const currentViewExpense = filteredMovements.filter(m => m.type === 'expense').reduce((acc, m) => acc + m.amount, 0);
             const currentViewNet = currentViewIncome - currentViewExpense;
 
-            // 3. Desglose detallado Efectivo vs Digital (para la tarjeta negra)
+            const allMonthExpenses = finances.movements.filter(m => m.type === 'expense');
+            const totalLaboral = allMonthExpenses.filter(m => m.category !== 'personal').reduce((acc, m) => acc + m.amount, 0);
+            const totalPersonal = allMonthExpenses.filter(m => m.category === 'personal').reduce((acc, m) => acc + m.amount, 0);
+
             const currentViewCash = filteredMovements.reduce((acc, m) => {
                 let val = 0;
                 if (m.paymentMethod === 'mixed' && m.paymentDetails) val = parseFloat(m.paymentDetails.cash) || 0;
                 else if (m.paymentMethod === 'cash' || !m.paymentMethod) val = m.amount;
-                else if (m.paymentMethod === 'transfer') val = 0;
                 return m.type === 'income' ? acc + val : acc - val;
             }, 0);
 
@@ -1661,169 +1664,144 @@ const handleDoneConfirm = async () => {
                 let val = 0;
                 if (m.paymentMethod === 'mixed' && m.paymentDetails) val = parseFloat(m.paymentDetails.transfer) || 0;
                 else if (m.paymentMethod === 'transfer') val = m.amount;
-                else if (m.paymentMethod === 'cash') val = 0;
                 return m.type === 'income' ? acc + val : acc - val;
             }, 0);
 
-            // Determinamos qué valor mostrar en la Tarjeta Negra
-            let displayAmount = currentViewNet;
-            let displayLabel = 'Mes Actual';
-
-            if (financeFilter === 'cash') {
-                displayAmount = currentViewCash;
-                displayLabel = 'Efectivo Mes';
-            } else if (financeFilter === 'transfer') {
-                displayAmount = currentViewTransfer;
-                displayLabel = 'Digital Mes';
-            } else if (financeFilter === 'mixed') {
-                displayAmount = currentViewNet;
-                displayLabel = 'Pagos Mixtos';
-            }
+            let displayLabel = 'Balance del Mes';
+            if (financeFilter === 'cash') displayLabel = 'Balance Efectivo';
+            else if (financeFilter === 'transfer') displayLabel = 'Balance Digital';
+            else if (financeFilter === 'mixed') displayLabel = 'Balance Mixto';
 
             return (
                 <>
-                    {/* TARJETA DE BALANCE DINÁMICA */}
-                    <div className="bg-[#0c0a09] text-white p-8 rounded-3xl shadow-2xl relative overflow-hidden transition-all duration-500">
-                        <div className="absolute right-0 top-0 p-10 opacity-5"><Wallet size={150}/></div>
-                        <div className="relative z-10 flex flex-col md:flex-row justify-between md:items-end gap-6">
-                            <div>
-                                <p className="text-stone-400 text-xs font-bold uppercase tracking-widest mb-2">
-                                    Balance {displayLabel}
-                                </p>
-                                <h3 className="text-4xl md:text-5xl font-bold brand-font tracking-tight text-white animate-in fade-in">
-                                    ${displayAmount.toLocaleString()}
+                    {/* 1. TARJETA PRINCIPAL (HERO) */}
+                    <div className="bg-[#0c0a09] text-white p-6 md:p-8 rounded-3xl shadow-2xl relative overflow-hidden group">
+                        <div className="absolute right-0 top-0 p-10 opacity-5 group-hover:opacity-10 transition-opacity duration-500"><Wallet size={180}/></div>
+                        
+                        <div className="relative z-10 flex flex-col md:flex-row justify-between gap-8">
+                            <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2 text-stone-400">
+                                    <Activity size={16} className="text-amber-500"/>
+                                    <span className="text-xs font-bold uppercase tracking-[0.2em]">{displayLabel}</span>
+                                </div>
+                                <h3 className="text-5xl font-bold brand-font tracking-tight text-white mb-8">
+                                    ${currentViewNet.toLocaleString()}
                                 </h3>
-                                
-                                {/* Desglose pequeño (se muestra en Todos o Mixto) */}
-                                {(financeFilter === 'all' || financeFilter === 'mixed') && (
-                                    <div className="flex gap-4 mt-6">
-                                        <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div><span className="text-sm text-stone-300">Efvo: <b>${currentViewCash.toLocaleString()}</b></span></div>
-                                        <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div><span className="text-sm text-stone-300">Dig: <b>${currentViewTransfer.toLocaleString()}</b></span></div>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="flex gap-3 w-full md:w-auto">
-                                <button onClick={() => { setEditingFinanceId(null); setIncomeForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}); setIsIncomeModalOpen(true); }} className="flex-1 md:flex-none bg-stone-800 hover:bg-stone-700 text-emerald-400 px-5 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border border-stone-700"><ArrowUpCircle size={18} /> Ingreso</button>
-                                <button onClick={() => { setEditingFinanceId(null); setExpenseForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}); setIsExpenseModalOpen(true); }} className="flex-1 md:flex-none bg-stone-800 hover:bg-stone-700 text-red-400 px-5 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border border-stone-700"><ArrowDownCircle size={18} /> Gasto</button>
-                            </div>
-                        </div>
-                    </div>
 
-                {/* BOTONES DE FILTRO CON EL NUEVO BOTÓN DE GASTOS */}
-                    <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar items-center justify-end md:justify-start">
-                        <span className="text-xs font-bold text-stone-400 mr-2 uppercase tracking-wide hidden md:inline">Filtrar vista:</span>
-                        
-                        <button onClick={() => setFinanceFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${financeFilter === 'all' ? 'bg-stone-900 text-white border-stone-900 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
-                            Todos
-                        </button>
-                        
-                        {/* --- BOTÓN NUEVO ROJO (SOLO GASTOS) --- */}
-                        <button onClick={() => setFinanceFilter('expenses')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${financeFilter === 'expenses' ? 'bg-red-600 text-white border-red-600 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
-                            <ArrowDownCircle size={14}/> Solo Gastos
-                        </button>
-                        {/* -------------------------------------- */}
-
-                        <button onClick={() => setFinanceFilter('cash')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${financeFilter === 'cash' ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
-                            <Banknote size={14}/> Solo Efectivo
-                        </button>
-                        
-                        <button onClick={() => setFinanceFilter('transfer')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${financeFilter === 'transfer' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
-                            <CreditCard size={14}/> Solo Digital
-                        </button>
-                        
-                        <button onClick={() => setFinanceFilter('mixed')} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${financeFilter === 'mixed' ? 'bg-amber-600 text-white border-amber-600 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
-                            <Grid size={14}/> Solo Mixto
-                        </button>
-                    </div>
-                    {/* TARJETAS DE RESUMEN (DINÁMICAS) */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="glass-panel p-6 rounded-2xl shadow-sm border border-stone-200/50 bg-white">
-                            <div className="flex items-center gap-2 mb-2">
-                                <ArrowDownLeft size={16} className="text-emerald-600"/>
-                                <span className="text-xs font-bold uppercase text-stone-400">
-                                    Ingresos {financeFilter === 'all' ? '' : 'Filtrado'}
-                                </span>
-                            </div>
-                            <p className="text-2xl font-bold text-emerald-600 animate-in fade-in duration-300">+${currentViewIncome.toLocaleString()}</p>
-                        </div>
-                        <div className="glass-panel p-6 rounded-2xl shadow-sm border border-stone-200/50 bg-white">
-                            <div className="flex items-center gap-2 mb-2">
-                                <ArrowUpRight size={16} className="text-red-500"/>
-                                <span className="text-xs font-bold uppercase text-stone-400">
-                                    Gastos {financeFilter === 'all' ? '' : 'Filtrado'}
-                                </span>
-                            </div>
-                            <p className="text-2xl font-bold text-red-500 animate-in fade-in duration-300">-${currentViewExpense.toLocaleString()}</p>
-                        </div>
-                        <div className={`glass-panel p-6 rounded-2xl shadow-sm border border-stone-200/50 ${currentViewNet >= 0 ? 'bg-emerald-50/50' : 'bg-red-50/50'}`}>
-                            <div className="flex items-center gap-2 mb-2">
-                                <Activity size={16} className="text-stone-600"/>
-                                <span className="text-xs font-bold uppercase text-stone-500">Neto {financeFilter === 'all' ? '' : 'Filtrado'}</span>
-                            </div>
-                            <p className={`text-2xl font-bold animate-in fade-in duration-300 ${currentViewNet >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>${currentViewNet.toLocaleString()}</p>
-                        </div>
-                    </div>
-
-                    {/* TABLA DE MOVIMIENTOS */}
-                    <div className="bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
-                        <div className="px-6 py-4 border-b border-stone-50 bg-stone-50/30 flex justify-between items-center">
-                            <h3 className="font-bold text-stone-800">Movimientos Recientes</h3>
-                            <span className="text-xs text-stone-400 font-medium bg-white px-2 py-1 rounded border border-stone-100">{filteredMovements.length} regs.</span>
-                        </div>
-                        
-                        {/* Vista Escritorio: Tabla */}
-                        <div className="hidden md:block overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="bg-stone-50 text-xs text-stone-500 uppercase font-bold text-left"><tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Detalle</th><th className="px-6 py-3 text-right">Monto</th><th className="px-6 py-3 text-right">Acciones</th></tr></thead>
-                                <tbody className="divide-y divide-stone-50">
-                                    {filteredMovements.map((m, i) => (
-                                        <tr key={i} className="hover:bg-stone-50/50 transition-colors group">
-                                            <td className="px-6 py-3.5 text-stone-500 whitespace-nowrap">{new Date(m.date).toLocaleDateString()}</td>
-                                            <td className="px-6 py-3.5 font-medium text-stone-800">
-                                                {m.desc} 
-                                                <span className={`text-[10px] px-1.5 rounded ml-2 ${m.type === 'income' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{m.type === 'income' ? 'IN' : 'OUT'}</span>
-                                                {m.paymentMethod === 'mixed' && <span className="ml-1 text-[9px] bg-amber-100 text-amber-700 px-1 rounded border border-amber-200">Mixto</span>}
-                                            </td>
-                                            <td className={`px-6 py-3.5 text-right font-bold ${m.type === 'income' ? 'text-emerald-600' : 'text-red-500'}`}>{m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}</td>
-                                            <td className="px-6 py-3.5 text-right">
-    <div className="flex justify-end gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
-        <button onClick={() => handleEditFinance(m)} className="p-1.5 hover:bg-stone-100 rounded text-stone-500"><Pencil size={14}/></button>
-        <button onClick={() => handleDeleteFinance(m)} className="p-1.5 hover:bg-red-50 rounded text-red-500"><Trash2 size={14}/></button>
-    </div>
-</td>
-                                        </tr>
-                                    ))}
-                                    {filteredMovements.length === 0 && <tr><td colSpan="4" className="px-6 py-8 text-center text-stone-400">No hay movimientos con este filtro</td></tr>}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Vista Móvil: Cards */}
-                        {/* Vista Móvil: Cards */}
-                        <div className="md:hidden p-4 space-y-3">
-                            {filteredMovements.map((m, i) => (
-                                <div key={i} className="bg-stone-50 p-4 rounded-xl border border-stone-100 flex justify-between items-center group">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-8 border-t border-stone-800 pt-6">
                                     <div>
-                                        <p className="text-xs text-stone-400 font-mono mb-1">{new Date(m.date).toLocaleDateString()}</p>
-                                        <p className="font-bold text-stone-900 leading-tight">{m.desc}</p>
-                                        <div className="flex gap-1 mt-1">
-                                            <span className={`text-[10px] px-1.5 rounded inline-block font-bold ${m.type === 'income' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{m.type === 'income' ? 'INGRESO' : 'GASTO'}</span>
-                                            {m.paymentMethod === 'mixed' && <span className="text-[10px] px-1.5 rounded inline-block font-bold bg-amber-100 text-amber-700 border border-amber-200">Mixto</span>}
-                                        </div>
+                                        <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">Ingresos</p>
+                                        <p className="font-bold text-emerald-400 text-lg">+${currentViewIncome.toLocaleString()}</p>
                                     </div>
-                                    <div className="text-right">
-                                        <p className={`text-lg font-bold ${m.type === 'income' ? 'text-emerald-600' : 'text-red-500'}`}>{m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}</p>
-                                        
-                                        {/* BOTONES VISIBLES SIEMPRE (SIN IF) */}
-                                        <div className="flex justify-end gap-2 mt-2">
-                                            <button onClick={() => handleEditFinance(m)} className="text-stone-400 hover:text-stone-600"><Pencil size={16}/></button>
-                                            <button onClick={() => handleDeleteFinance(m)} className="text-stone-400 hover:text-red-500"><Trash2 size={16}/></button>
-                                        </div>
+                                    <div>
+                                        <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">Gastos</p>
+                                        <p className="font-bold text-red-400 text-lg">-${currentViewExpense.toLocaleString()}</p>
+                                    </div>
+                                    {(financeFilter === 'all' || financeFilter === 'mixed') && (
+                                        <>
+                                            <div className="hidden md:block w-px bg-stone-800 absolute h-10 left-1/2"></div>
+                                            <div>
+                                                <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">En Caja (Efvo)</p>
+                                                <p className="font-bold text-stone-300 text-lg">${currentViewCash.toLocaleString()}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">En Banco (Dig)</p>
+                                                <p className="font-bold text-stone-300 text-lg">${currentViewTransfer.toLocaleString()}</p>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="flex md:flex-col gap-3 justify-end min-w-[160px]">
+                                <button onClick={() => { setEditingFinanceId(null); setIncomeForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}); setIsIncomeModalOpen(true); }} 
+                                    className="flex-1 bg-stone-800 hover:bg-stone-700 text-emerald-400 py-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-stone-700 transition-all active:scale-95 shadow-lg">
+                                    <ArrowUpCircle size={20} /> NUEVO INGRESO
+                                </button>
+                                <button onClick={() => { setEditingFinanceId(null); setExpenseForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString(), category: 'laboral'}); setIsExpenseModalOpen(true); }} 
+                                    className="flex-1 bg-stone-800 hover:bg-stone-700 text-red-400 py-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-stone-700 transition-all active:scale-95 shadow-lg">
+                                    <ArrowDownCircle size={20} /> NUEVO GASTO
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 2. DESGLOSE DE GASTOS */}
+                    {(financeFilter === 'all' || financeFilter.includes('expenses')) && (
+                        <div className="grid grid-cols-2 gap-4">
+                            <button onClick={() => setFinanceFilter(financeFilter === 'expenses_work' ? 'expenses' : 'expenses_work')} 
+                                className={`relative p-5 rounded-2xl border transition-all text-left group overflow-hidden ${financeFilter === 'expenses_work' ? 'bg-stone-800 text-white border-stone-800 shadow-xl' : 'bg-white border-stone-100 hover:border-stone-300 text-stone-800 hover:shadow-md'}`}>
+                                <div className="relative z-10">
+                                    <div className={`flex items-center gap-2 mb-2 ${financeFilter === 'expenses_work' ? 'text-stone-400' : 'text-stone-400'}`}>
+                                        <Briefcase size={16}/> <span className="text-[10px] font-bold uppercase tracking-widest">Gastos Laborales</span>
+                                    </div>
+                                    <span className="text-2xl font-bold tracking-tight">${totalLaboral.toLocaleString()}</span>
+                                </div>
+                                {financeFilter === 'expenses_work' && <div className="absolute right-4 top-4 w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>}
+                            </button>
+                            
+                            <button onClick={() => setFinanceFilter(financeFilter === 'expenses_personal' ? 'expenses' : 'expenses_personal')} 
+                                className={`relative p-5 rounded-2xl border transition-all text-left group overflow-hidden ${financeFilter === 'expenses_personal' ? 'bg-amber-900 text-white border-amber-900 shadow-xl' : 'bg-white border-stone-100 hover:border-stone-300 text-stone-800 hover:shadow-md'}`}>
+                                <div className="relative z-10">
+                                    <div className={`flex items-center gap-2 mb-2 ${financeFilter === 'expenses_personal' ? 'text-amber-200' : 'text-stone-400'}`}>
+                                        <User size={16}/> <span className="text-[10px] font-bold uppercase tracking-widest">Gastos Personales</span>
+                                    </div>
+                                    <span className="text-2xl font-bold tracking-tight">${totalPersonal.toLocaleString()}</span>
+                                </div>
+                                {financeFilter === 'expenses_personal' && <div className="absolute right-4 top-4 w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* 3. BARRA DE FILTROS (AHORA CON MIXTO) */}
+                    <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-stone-200 pb-4 mt-2">
+                        <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar w-full md:w-auto">
+                             <button onClick={() => setFinanceFilter('all')} className={`px-5 py-2 rounded-full text-xs font-bold transition-all border ${financeFilter === 'all' ? 'bg-stone-900 text-white border-stone-900 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>Todo</button>
+                             
+                             <div className="w-px h-6 bg-stone-300 mx-1 self-center opacity-50"></div>
+                             
+                             <button onClick={() => setFinanceFilter('expenses')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'expenses' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>Gastos</button>
+                             <button onClick={() => setFinanceFilter('cash')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'cash' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><Banknote size={14}/> Efvo</button>
+                             <button onClick={() => setFinanceFilter('transfer')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'transfer' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><CreditCard size={14}/> Dig</button>
+                             
+                             {/* BOTÓN MIXTO AGREGADO AQUÍ */}
+                             <button onClick={() => setFinanceFilter('mixed')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'mixed' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><Grid size={14}/> Mixto</button>
+                        </div>
+                        <p className="text-[10px] text-stone-400 font-bold uppercase tracking-widest">{filteredMovements.length} REGISTROS</p>
+                    </div>
+
+                    {/* 4. LISTA DE MOVIMIENTOS */}
+                    <div className="space-y-3 pb-12">
+                        {filteredMovements.map((m, i) => (
+                            <div key={i} className="bg-white p-4 rounded-2xl border border-stone-100 flex justify-between items-center group hover:shadow-md transition-all hover:border-stone-200">
+                                <div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-[10px] font-mono text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded">{new Date(m.date).toLocaleDateString()}</span>
+                                        {/* Etiquetas de tipo */}
+                                        {m.type === 'expense' ? (
+                                            m.category === 'personal' 
+                                            ? <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded"><User size={10}/> Personal</span>
+                                            : <span className="flex items-center gap-1 text-[10px] font-bold text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded"><Briefcase size={10}/> Laboral</span>
+                                        ) : (
+                                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Ingreso</span>
+                                        )}
+                                        {m.paymentMethod === 'mixed' && <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">Mixto</span>}
+                                    </div>
+                                    <p className="font-bold text-stone-800 text-sm">{m.desc}</p>
+                                </div>
+                                
+                                <div className="text-right">
+                                    <p className={`text-lg font-bold ${m.type === 'income' ? 'text-emerald-600' : 'text-red-500'}`}>
+                                        {m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}
+                                    </p>
+                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={() => handleEditFinance(m)} className="text-stone-300 hover:text-stone-600"><Pencil size={14}/></button>
+                                        <button onClick={() => handleDeleteFinance(m)} className="text-stone-300 hover:text-red-500"><Trash2 size={14}/></button>
                                     </div>
                                 </div>
-                            ))}
-                            {filteredMovements.length === 0 && <p className="text-center text-stone-400 py-6">No hay movimientos con este filtro</p>}
-                        </div>
+                            </div>
+                        ))}
+                        {filteredMovements.length === 0 && <div className="py-12 text-center border-2 border-dashed border-stone-100 rounded-2xl"><p className="text-stone-300 font-medium">No hay movimientos</p></div>}
                     </div>
                 </>
             );
@@ -2332,41 +2310,53 @@ const handleDoneConfirm = async () => {
 						</form>
 					</Modal>
 
-                    <Modal isOpen={isExpenseModalOpen} onClose={() => setIsExpenseModalOpen(false)} title={editingFinanceId ? "Editar Gasto" : "Registrar Gasto"}>
-						<form onSubmit={(e) => { e.preventDefault(); handleSimpleSave('expenses', {...prepareFinanceData(expenseForm), type:'expense'}, setIsExpenseModalOpen, setExpenseForm, {description:'', amount:'', method:'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}, editingFinanceId) }} className="space-y-5">
-						{/* CAMPO DE FECHA AGREGADO */}
-						<div className="space-y-1">
-						<label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha</label>
-						<input 
-							type="date" 
-							className="w-full p-3 bg-stone-50 border rounded-xl" 
-							value={expenseForm.date.split('T')[0]} 
-							onChange={e => setExpenseForm({...expenseForm, date: e.target.value})} 
-									/>
-						</div>
-
-						<div className="space-y-1"><label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Concepto</label><input type="text" autoFocus className="w-full p-3 bg-stone-50 border rounded-xl" value={expenseForm.description} onChange={e => setExpenseForm({...expenseForm, description: e.target.value})} /></div>
-						<div className="space-y-1"><label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto Total</label><input type="number" className="w-full p-3 bg-stone-50 border rounded-xl font-mono" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} /></div>
+                <Modal isOpen={isExpenseModalOpen} onClose={() => setIsExpenseModalOpen(false)} title={editingFinanceId ? "Editar Gasto" : "Registrar Gasto"}>
+    <form onSubmit={(e) => { e.preventDefault(); handleSimpleSave('expenses', {...prepareFinanceData(expenseForm), type:'expense'}, setIsExpenseModalOpen, setExpenseForm, {description:'', amount:'', method:'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString(), category: 'laboral'}, editingFinanceId) }} className="space-y-5">
         
-						<div className="space-y-2">
-						<label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Método</label>
-						<div className="grid grid-cols-3 gap-3">
-							<button type="button" onClick={() => setExpenseForm({...expenseForm, method: 'cash'})} className={`py-3 rounded-xl border font-bold text-sm ${expenseForm.method === 'cash' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Efectivo</button>
-							<button type="button" onClick={() => setExpenseForm({...expenseForm, method: 'transfer'})} className={`py-3 rounded-xl border font-bold text-sm ${expenseForm.method === 'transfer' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Digital</button>
-							<button type="button" onClick={() => setExpenseForm({...expenseForm, method: 'mixed'})} className={`py-3 rounded-xl border font-bold text-sm ${expenseForm.method === 'mixed' ? 'bg-amber-600 text-white' : 'bg-white text-stone-500'}`}>Mixto</button>
-						</div>
-						</div>
+        {/* CAMPO DE FECHA */}
+        <div className="space-y-1">
+            <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha</label>
+            <input 
+                type="date" 
+                className="w-full p-3 bg-stone-50 border rounded-xl" 
+                value={expenseForm.date.split('T')[0]} 
+                onChange={e => setExpenseForm({...expenseForm, date: e.target.value})} 
+            />
+        </div>
 
-						{expenseForm.method === 'mixed' && (
-					<div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
-					<div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Efectivo</label><input type="number" className="w-full p-3 bg-stone-50 border border-amber-200 rounded-xl font-bold" value={expenseForm.mixedCash} onChange={e => setExpenseForm({...expenseForm, mixedCash: e.target.value})} /></div>
-					<div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Digital</label><input type="number" className="w-full p-3 bg-stone-50 border border-blue-200 rounded-xl font-bold" value={expenseForm.mixedTransfer} onChange={e => setExpenseForm({...expenseForm, mixedTransfer: e.target.value})} /></div>
-					</div>
+        {/* --- NUEVO: BOTONES DE CATEGORÍA --- */}
+        <div className="bg-stone-100 p-1 rounded-xl grid grid-cols-2 gap-1">
+            <button type="button" onClick={() => setExpenseForm({...expenseForm, category: 'laboral'})} className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${expenseForm.category === 'laboral' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-400 hover:text-stone-600'}`}>
+                <Briefcase size={14}/> Laboral
+            </button>
+            <button type="button" onClick={() => setExpenseForm({...expenseForm, category: 'personal'})} className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${expenseForm.category === 'personal' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-400 hover:text-stone-600'}`}>
+                <User size={14}/> Personal
+            </button>
+        </div>
+        {/* ----------------------------------- */}
+
+        <div className="space-y-1"><label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Concepto</label><input type="text" autoFocus className="w-full p-3 bg-stone-50 border rounded-xl" value={expenseForm.description} onChange={e => setExpenseForm({...expenseForm, description: e.target.value})} /></div>
+        <div className="space-y-1"><label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto Total</label><input type="number" className="w-full p-3 bg-stone-50 border rounded-xl font-mono" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} /></div>
+
+        <div className="space-y-2">
+            <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Método</label>
+            <div className="grid grid-cols-3 gap-3">
+                <button type="button" onClick={() => setExpenseForm({...expenseForm, method: 'cash'})} className={`py-3 rounded-xl border font-bold text-sm ${expenseForm.method === 'cash' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Efectivo</button>
+                <button type="button" onClick={() => setExpenseForm({...expenseForm, method: 'transfer'})} className={`py-3 rounded-xl border font-bold text-sm ${expenseForm.method === 'transfer' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Digital</button>
+                <button type="button" onClick={() => setExpenseForm({...expenseForm, method: 'mixed'})} className={`py-3 rounded-xl border font-bold text-sm ${expenseForm.method === 'mixed' ? 'bg-amber-600 text-white' : 'bg-white text-stone-500'}`}>Mixto</button>
+            </div>
+        </div>
+
+        {expenseForm.method === 'mixed' && (
+            <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
+                <div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Efectivo</label><input type="number" className="w-full p-3 bg-stone-50 border border-amber-200 rounded-xl font-bold" value={expenseForm.mixedCash} onChange={e => setExpenseForm({...expenseForm, mixedCash: e.target.value})} /></div>
+                <div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Digital</label><input type="number" className="w-full p-3 bg-stone-50 border border-blue-200 rounded-xl font-bold" value={expenseForm.mixedTransfer} onChange={e => setExpenseForm({...expenseForm, mixedTransfer: e.target.value})} /></div>
+            </div>
         )}
 
-					<button type="submit" disabled={isSaving} className="w-full bg-red-500 text-white py-3.5 rounded-xl font-bold">{editingFinanceId ? 'Guardar Cambios' : 'Registrar'}</button>
-					</form>
-					</Modal>
+        <button type="submit" disabled={isSaving} className="w-full bg-red-500 text-white py-3.5 rounded-xl font-bold">{editingFinanceId ? 'Guardar Cambios' : 'Registrar'}</button>
+    </form>
+</Modal>
 
                     {/* DEBT MODAL UPDATE */}
                     <Modal isOpen={isDebtModalOpen} onClose={() => setIsDebtModalOpen(false)} title="Nueva Deuda">
