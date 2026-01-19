@@ -93,7 +93,7 @@
   <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
-        import { 
+      import { 
             Check, X, TrendingUp, DollarSign, Calendar, Search, 
             Trash2, Award, Zap, Plus, AlertCircle, BarChart3, 
             BrainCircuit, Home, PieChart, Star, Pencil, Filter, 
@@ -105,7 +105,8 @@
             Truck, Phone, Mail, ArrowUpCircle, ArrowDownCircle, 
             Clock, Edit3, Crown, Layers, Scissors, Shirt, Users,
             Package, FileText, ClipboardList, ChevronDown, ChevronUp,
-            CalendarClock, Menu, Grid, ShoppingCart, Briefcase
+            CalendarClock, Menu, Grid, ShoppingCart, Briefcase,
+            PiggyBank, ArrowLeftRight, ArrowRight
         } from 'lucide-react';
 		
         // --- FIREBASE SETUP ---
@@ -522,6 +523,30 @@
             const [isSaving, setIsSaving] = useState(false);
             const [connectionStatus, setConnectionStatus] = useState('checking');
 			const [financeFilter, setFinanceFilter] = useState('all');
+			
+			// --- NUEVOS ESTADOS PARA AHORROS Y MOVIMIENTOS ---
+            const [savingsLogs, setSavingsLogs] = useState([]); 
+            const [isSavingsModalOpen, setIsSavingsModalOpen] = useState(false);
+            const [isSavingsDepositModalOpen, setIsSavingsDepositModalOpen] = useState(false);
+            
+            // Formulario de Ahorro
+            const [savingsForm, setSavingsForm] = useState({
+                amount: '',
+                destination: 'cash', // A donde va en Ahorros: 'cash' o 'transfer'
+                source: 'external',  // De donde viene: 'external' o 'business'
+                businessAccount: 'cash', // Si viene del negocio: ¿De 'cash' o 'transfer'?
+                date: new Date().toISOString()
+            });
+
+            // Estados para Movimientos Internos (Business Swaps)
+            const [businessSwaps, setBusinessSwaps] = useState([]);
+            const [isBusinessSwapModalOpen, setIsBusinessSwapModalOpen] = useState(false);
+            const [businessSwapForm, setBusinessSwapForm] = useState({
+                amount: '',
+                from: 'cash',
+                to: 'transfer',
+                date: new Date().toISOString()
+            });
    
               // --- AUTH & INIT ---
             useEffect(() => {
@@ -549,7 +574,7 @@
                 return () => unsubscribe();
             }, []);
 
-            // --- DATA SYNC ---
+          // --- DATA SYNC ---
             useEffect(() => {
                 if (!user || !isConfigured) return;
                 
@@ -580,7 +605,14 @@
                 const suppOrderRef = collection(db, 'artifacts', appId, 'public', 'data', 'supplier_orders');
                 const unsubSuppOrders = onSnapshot(query(suppOrderRef), (s) => setSupplierOrders(s.docs.map(d => ({ id: d.id, ...d.data() }))));
 
-                return () => { unsubOrders(); unsubExpenses(); unsubIncomes(); unsubDebts(); unsubClients(); unsubSuppliers(); unsubSuppOrders(); };
+                // --- NUEVAS CONEXIONES AHORROS Y MOVIMIENTOS ---
+                const savingsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_logs');
+                const unsubSavings = onSnapshot(query(savingsRef), (s) => setSavingsLogs(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => new Date(b.date) - new Date(a.date))));
+
+                const bSwapsRef = collection(db, 'artifacts', appId, 'public', 'data', 'business_swaps');
+                const unsubBSwaps = onSnapshot(query(bSwapsRef), (s) => setBusinessSwaps(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => new Date(b.date) - new Date(a.date))));
+
+                return () => { unsubOrders(); unsubExpenses(); unsubIncomes(); unsubDebts(); unsubClients(); unsubSuppliers(); unsubSuppOrders(); unsubSavings(); unsubBSwaps(); };
             }, [user]);
 
             // --- HELPERS ---
@@ -679,7 +711,21 @@
             }, [clients, orders]);
 
 
-           // FINANCES CALCULATION UPDATED FOR PARTIAL PAYMENTS
+           // 1. CALCULO SALDO ALCANCÍA
+            const savingsBalance = useMemo(() => {
+                let cash = 0;
+                let digital = 0;
+                savingsLogs.forEach(log => {
+                    const amt = parseFloat(log.amount) || 0;
+                    if (log.type === 'deposit') {
+                        if (log.destination === 'cash') cash += amt;
+                        if (log.destination === 'transfer') digital += amt;
+                    } 
+                });
+                return { cash, digital, total: cash + digital };
+            }, [savingsLogs]);
+
+            // 2. FINANZAS DEL NEGOCIO (CON MOVIMIENTOS INTERNOS)
             const finances = useMemo(() => {
                 const isCurrentMonth = (dateStr) => {
                     const d = new Date(dateStr);
@@ -695,30 +741,37 @@
                     paymentDetails: item.paymentDetails || null
                 });
 
-                // 1. Extraer pagos de pedidos (Completos antiguos, Completos nuevos y Parciales)
                 const orderMovements = [];
                 orders.forEach(o => {
-                    // Si tiene historial de pagos (Sistema Nuevo con parciales)
                     if (o.paymentHistory && o.paymentHistory.length > 0) {
                         o.paymentHistory.forEach((h, index) => {
                             orderMovements.push(mapFinanceItem({
-                                ...h, 
-                                client: o.client, 
-                                detail: `Pago ${h.isPartial ? 'Parcial' : 'Final'} (${o.detail})`,
-                                id: `${o.id}_pay_${index}`, // ID único artificial para la lista
-                                date: h.date
+                                ...h, client: o.client, detail: `Pago ${h.isPartial ? 'Parcial' : 'Final'} (${o.detail})`,
+                                id: `${o.id}_pay_${index}`, date: h.date
                             }, 'income', 'orders'));
                         });
-                    } 
-                    // Si está pagado pero NO tiene historial (Sistema Viejo - Retrocompatibilidad)
-                    else if (o.paid) {
+                    } else if (o.paid) {
                         orderMovements.push(mapFinanceItem({
                             ...o, amount: o.price, date: o.paymentDate || o.date
                         }, 'income', 'orders'));
                     }
                 });
 
-                // Filtrar por mes actual para los totales del mes
+                // --- CALCULAR MOVIMIENTOS INTERNOS (SWAPS) ---
+                let swapToCash = 0;
+                let swapToTransfer = 0;
+
+                businessSwaps.forEach(s => {
+                    const amt = parseFloat(s.amount) || 0;
+                    if (s.to === 'cash') {
+                        swapToCash += amt;      
+                        swapToTransfer -= amt;  
+                    } else {
+                        swapToTransfer += amt;  
+                        swapToCash -= amt;      
+                    }
+                });
+
                 const monthMovements = orderMovements.filter(m => isCurrentMonth(m.date));
                 const monthExpenses = expenses.filter(e => isCurrentMonth(e.date)).map(e => mapFinanceItem(e, 'expense', 'expenses'));
                 const monthIncomes = incomes.filter(i => isCurrentMonth(i.date)).map(i => mapFinanceItem(i, 'income', 'extra_incomes'));
@@ -726,7 +779,6 @@
                 const incomeVal = monthMovements.reduce((acc, m) => acc + m.amount, 0) + monthIncomes.reduce((acc, i) => acc + i.amount, 0);
                 const expenseVal = monthExpenses.reduce((acc, e) => acc + e.amount, 0);
 
-                // Helper para sumar por método
                 const sumByMethod = (items, targetMethod) => items.reduce((sum, item) => {
                     if (item.paymentMethod === 'mixed' && item.paymentDetails) {
                         return sum + (parseFloat(item.paymentDetails[targetMethod]) || 0);
@@ -737,17 +789,21 @@
                     return sum;
                 }, 0);
 
-                const allOrderMovements = orderMovements; // Todos los tiempos
+                const allOrderMovements = orderMovements;
                 const allExpenses = expenses.map(e => mapFinanceItem(e, 'expense', 'expenses'));
                 const allIncomes = incomes.map(i => mapFinanceItem(i, 'income', 'extra_incomes'));
 
-                const totalCash = (sumByMethod(allOrderMovements, 'cash') + sumByMethod(allIncomes, 'cash')) - sumByMethod(allExpenses, 'cash');
-                const totalTransfer = (sumByMethod(allOrderMovements, 'transfer') + sumByMethod(allIncomes, 'transfer')) - sumByMethod(allExpenses, 'transfer');
+                // --- CÁLCULO DE SALDOS ACTUALIZADO CON SWAPS ---
+                const rawCash = (sumByMethod(allOrderMovements, 'cash') + sumByMethod(allIncomes, 'cash')) - sumByMethod(allExpenses, 'cash');
+                const rawTransfer = (sumByMethod(allOrderMovements, 'transfer') + sumByMethod(allIncomes, 'transfer')) - sumByMethod(allExpenses, 'transfer');
+
+                const totalCash = rawCash + swapToCash;         
+                const totalTransfer = rawTransfer + swapToTransfer; 
 
                 const movements = [...monthMovements, ...monthIncomes, ...monthExpenses].sort((a, b) => new Date(b.date) - new Date(a.date));
 
                 return { incomeVal, expenseVal, net: incomeVal - expenseVal, totalCash, totalTransfer, totalBalance: totalCash + totalTransfer, movements };
-            }, [orders, expenses, incomes, currentDate]);
+            }, [orders, expenses, incomes, currentDate, businessSwaps]);
 
             const stats = useMemo(() => {
                 // Lógica de estadísticas actualizada para contar PAGOS REALES (incluyendo parciales)
@@ -1271,6 +1327,82 @@ const handleDoneConfirm = async () => {
                 }
                 return data;
             };
+			
+			// --- NUEVAS FUNCIONES DE GUARDADO ---
+
+            // 1. GUARDAR DEPOSITO EN AHORRO
+            const handleSaveSavingsDeposit = async (e) => {
+                e.preventDefault();
+                setIsSaving(true);
+                try {
+                    const amount = parseFloat(savingsForm.amount);
+                    if (!amount || amount <= 0) throw new Error("Monto inválido");
+
+                    const batch = writeBatch(db);
+
+                    // A. Log en Ahorros (Siempre se guarda)
+                    const savingRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_logs'));
+                    batch.set(savingRef, {
+                        type: 'deposit',
+                        amount: amount,
+                        destination: savingsForm.destination, // cash o transfer (ahorros)
+                        source: savingsForm.source, // external o business
+                        date: savingsForm.date,
+                        createdAt: new Date().toISOString()
+                    });
+
+                    // B. Si sale del negocio -> Crear Gasto Automático
+                    if (savingsForm.source === 'business') {
+                        const expenseRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'));
+                        batch.set(expenseRef, {
+                            description: `Retiro a Ahorros (${savingsForm.destination === 'cash' ? 'Efectivo' : 'Digital'})`,
+                            amount: amount,
+                            date: savingsForm.date,
+                            method: savingsForm.businessAccount, // Sale de la cuenta elegida del negocio
+                            category: 'personal', // Se marca como retiro personal
+                            createdAt: new Date().toISOString()
+                        });
+                    }
+
+                    await batch.commit();
+                    addToast('Ahorro registrado correctamente');
+                    setIsSavingsDepositModalOpen(false);
+                    // Reiniciar formulario
+                    setSavingsForm({ amount: '', destination: 'cash', source: 'external', businessAccount: 'cash', date: new Date().toISOString() });
+
+                } catch (error) {
+                    console.error(error);
+                    addToast('Error al guardar ahorro', 'error');
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            // 2. GUARDAR MOVIMIENTO INTERNO NEGOCIO (SWAP)
+            const handleSaveBusinessSwap = async (e) => {
+                e.preventDefault();
+                setIsSaving(true);
+                try {
+                    const amount = parseFloat(businessSwapForm.amount);
+                    if (!amount || amount <= 0) { addToast('Monto inválido', 'error'); return; }
+
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'business_swaps'), {
+                        amount: amount,
+                        from: businessSwapForm.from, 
+                        to: businessSwapForm.to,     
+                        date: businessSwapForm.date,
+                        createdAt: new Date().toISOString()
+                    });
+
+                    addToast('Movimiento registrado');
+                    // Limpiar formulario
+                    setBusinessSwapForm({ amount: '', from: 'cash', to: 'transfer', date: new Date().toISOString() });
+                } catch (err) {
+                    addToast('Error al guardar', 'error');
+                } finally {
+                    setIsSaving(false);
+                }
+            };
 
             if (!isConfigured) return <ConfigErrorScreen />;
       
@@ -1713,16 +1845,36 @@ const handleDoneConfirm = async () => {
                                 </div>
                             </div>
 
+                            {/* --- SECCIÓN DE BOTONES ACTUALIZADA --- */}
                             <div className="flex md:flex-col gap-3 justify-end min-w-[160px]">
-                                <button onClick={() => { setEditingFinanceId(null); setIncomeForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}); setIsIncomeModalOpen(true); }} 
-                                    className="flex-1 bg-stone-800 hover:bg-stone-700 text-emerald-400 py-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-stone-700 transition-all active:scale-95 shadow-lg">
-                                    <ArrowUpCircle size={20} /> NUEVO INGRESO
-                                </button>
-                                <button onClick={() => { setEditingFinanceId(null); setExpenseForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString(), category: 'laboral'}); setIsExpenseModalOpen(true); }} 
-                                    className="flex-1 bg-stone-800 hover:bg-stone-700 text-red-400 py-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-stone-700 transition-all active:scale-95 shadow-lg">
-                                    <ArrowDownCircle size={20} /> NUEVO GASTO
-                                </button>
+                                {/* Botones Operativos (Arriba) */}
+                                <div className="flex gap-2 w-full">
+                                     <button onClick={() => { setEditingFinanceId(null); setIncomeForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}); setIsIncomeModalOpen(true); }} 
+                                        className="flex-1 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-400 py-3 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 border border-emerald-800/50 transition-all">
+                                        <ArrowUpCircle size={16} /> INGRESO
+                                    </button>
+                                    <button onClick={() => { setEditingFinanceId(null); setExpenseForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString(), category: 'laboral'}); setIsExpenseModalOpen(true); }} 
+                                        className="flex-1 bg-red-900/40 hover:bg-red-900/60 text-red-400 py-3 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 border border-red-800/50 transition-all">
+                                        <ArrowDownCircle size={16} /> GASTO
+                                    </button>
+                                </div>
+
+                                {/* Botones de Gestión (Abajo) */}
+                                <div className="flex gap-2 w-full mt-1">
+                                    {/* BOTÓN ALCANCÍA (AHORROS) */}
+                                    <button onClick={() => setIsSavingsModalOpen(true)} 
+                                        className="flex-[2] bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 border border-amber-600 shadow-lg shadow-amber-900/20 transition-all active:scale-95">
+                                        <PiggyBank size={18} /> AHORROS
+                                    </button>
+
+                                    {/* BOTÓN MOVIMIENTOS INTERNOS (NEGOCIO) */}
+                                    <button onClick={() => setIsBusinessSwapModalOpen(true)} 
+                                        className="flex-1 bg-stone-700 hover:bg-stone-600 text-stone-200 py-3 rounded-xl font-bold flex items-center justify-center border border-stone-600 shadow-lg transition-all active:scale-95" title="Mover dinero interno (Caja <-> Banco)">
+                                        <ArrowLeftRight size={18} />
+                                    </button>
+                                </div>
                             </div>
+                            {/* ---------------------------------------- */}
                         </div>
                     </div>
 
@@ -2469,6 +2621,198 @@ const handleDoneConfirm = async () => {
                             );
                         })()}
                     </Modal>
+					
+				{/* --- MODALES NUEVOS (AHORROS Y MOVIMIENTOS) --- */}
+
+                    {/* 1. MODAL VER ALCANCÍA (Saldo) */}
+                    <Modal isOpen={isSavingsModalOpen} onClose={() => setIsSavingsModalOpen(false)} title="Mi Alcancía" maxWidth="max-w-2xl">
+                        <div className="space-y-6">
+                            {/* Cabecera Total */}
+                            <div className="bg-stone-900 text-white p-6 rounded-2xl shadow-xl text-center relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-full opacity-10">
+                                    <div className="absolute -top-10 -left-10 w-40 h-40 bg-amber-500 rounded-full blur-3xl"></div>
+                                </div>
+                                <p className="text-stone-400 text-xs font-bold uppercase tracking-widest mb-1">Total Ahorrado</p>
+                                <h3 className="text-4xl font-bold brand-font text-amber-400">${savingsBalance.total.toLocaleString()}</h3>
+                            </div>
+
+                            {/* Columnas */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl text-center">
+                                    <div className="w-10 h-10 mx-auto bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-2"><Banknote size={20}/></div>
+                                    <p className="text-emerald-800 text-xs font-bold uppercase">Efectivo</p>
+                                    <p className="text-2xl font-bold text-stone-800">${savingsBalance.cash.toLocaleString()}</p>
+                                </div>
+                                <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-center">
+                                    <div className="w-10 h-10 mx-auto bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-2"><CreditCard size={20}/></div>
+                                    <p className="text-blue-800 text-xs font-bold uppercase">Digital</p>
+                                    <p className="text-2xl font-bold text-stone-800">${savingsBalance.digital.toLocaleString()}</p>
+                                </div>
+                            </div>
+
+                            {/* Acciones */}
+                            <div className="pt-4 border-t border-stone-100">
+                                <button onClick={() => { setIsSavingsModalOpen(false); setIsSavingsDepositModalOpen(true); }} className="w-full py-4 bg-stone-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-stone-800 shadow-lg transition-all">
+                                    <PiggyBank size={20} className="text-amber-400"/>
+                                    <span>Ingresar Dinero a la Cuenta</span>
+                                </button>
+                            </div>
+
+                            {/* Historial Reciente de Ahorros */}
+                            <div>
+                                <h4 className="font-bold text-sm text-stone-800 mb-3">Últimos Ingresos</h4>
+                                <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                                    {savingsLogs.length === 0 ? <p className="text-xs text-stone-400 italic">No hay registros aún.</p> : 
+                                    savingsLogs.slice(0, 10).map((log, i) => (
+                                        <div key={i} className="flex justify-between items-center text-xs p-3 bg-stone-50 rounded-lg border border-stone-100">
+                                            <div className="flex items-center gap-2">
+                                                <div className="p-1.5 bg-emerald-100 text-emerald-600 rounded-md"><ArrowDownLeft size={14}/></div>
+                                                <div>
+                                                    <p className="font-bold text-stone-700">Depósito <span className="font-normal text-stone-400"> • {new Date(log.date).toLocaleDateString()}</span></p>
+                                                    <p className="text-stone-500">
+                                                        {log.source === 'external' ? 'Externo' : 'Del Negocio'} <ArrowRight size={10} className="inline mx-1"/> {log.destination === 'cash' ? 'Efectivo' : 'Digital'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <span className="font-bold text-stone-900">${parseFloat(log.amount).toLocaleString()}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </Modal>
+
+                    {/* 2. MODAL DEPOSITO AHORRO (Formulario) */}
+                    <Modal isOpen={isSavingsDepositModalOpen} onClose={() => setIsSavingsDepositModalOpen(false)} title="Ingresar a la Alcancía">
+                        <form onSubmit={handleSaveSavingsDeposit} className="space-y-6">
+                            
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha y Hora</label>
+                                <div className="relative">
+                                    <input type="datetime-local" className="w-full p-3 pl-10 bg-stone-50 border rounded-xl" value={savingsForm.date.slice(0, 16)} onChange={e => setSavingsForm({...savingsForm, date: e.target.value})} />
+                                    <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">¿A dónde guardas el dinero?</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'cash'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'cash' ? 'bg-emerald-50 border-emerald-200 ring-1 ring-emerald-500' : 'bg-white border-stone-200 grayscale opacity-70'}`}>
+                                        <Banknote size={24} className="text-emerald-600"/>
+                                        <span className="font-bold text-sm text-emerald-800">Caja Ahorro (Efvo)</span>
+                                    </button>
+                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'transfer'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'transfer' ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500' : 'bg-white border-stone-200 grayscale opacity-70'}`}>
+                                        <CreditCard size={24} className="text-blue-600"/>
+                                        <span className="font-bold text-sm text-blue-800">Cuenta Ahorro (Dig)</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto</label>
+                                <input type="number" autoFocus className="w-full p-3 bg-stone-50 border rounded-xl font-mono text-xl" value={savingsForm.amount} onChange={e => setSavingsForm({...savingsForm, amount: e.target.value})} />
+                            </div>
+
+                            <div className="bg-stone-100 p-4 rounded-xl space-y-3">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest flex items-center gap-2"><MapPin size={14}/> ¿De dónde sacaste el dinero?</label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'external'})} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${savingsForm.source === 'external' ? 'bg-white border-stone-300 shadow-sm' : 'border-transparent text-stone-400 hover:bg-stone-200'}`}>
+                                        <span className="text-sm font-bold">Dinero Externo / Aporte Personal</span>
+                                        {savingsForm.source === 'external' && <Check size={16} className="text-stone-900"/>}
+                                    </button>
+                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'business'})} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${savingsForm.source === 'business' ? 'bg-white border-red-300 shadow-sm text-red-600' : 'border-transparent text-stone-400 hover:bg-stone-200'}`}>
+                                        <span className="text-sm font-bold">Sacar del Negocio</span>
+                                        {savingsForm.source === 'business' && <Check size={16} className="text-red-600"/>}
+                                    </button>
+                                </div>
+
+                                {savingsForm.source === 'business' && (
+                                    <div className="animate-in slide-in-from-top-2 pt-2 border-t border-stone-200 mt-2">
+                                        <p className="text-[10px] font-bold text-stone-500 uppercase mb-2">Elegir cuenta de origen (Negocio)</p>
+                                        <div className="flex gap-2">
+                                            <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'cash'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'cash' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-white text-stone-400 border-stone-200'}`}>Caja Efectivo</button>
+                                            <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'transfer'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'transfer' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-white text-stone-400 border-stone-200'}`}>Banco Digital</button>
+                                        </div>
+                                        <p className="text-[10px] text-red-500 mt-2 flex items-center gap-1"><AlertTriangle size={12}/> Se generará un GASTO automáticamente.</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <button type="submit" disabled={isSaving} className="w-full bg-stone-900 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2">
+                                Confirmar Ingreso <ArrowRight size={16}/>
+                            </button>
+                        </form>
+                    </Modal>
+
+                    {/* 3. MODAL MOVIMIENTOS INTERNOS (SWAP) + HISTORIAL */}
+                    <Modal isOpen={isBusinessSwapModalOpen} onClose={() => setIsBusinessSwapModalOpen(false)} title="Movimiento Interno (Negocio)">
+                        <div className="space-y-6">
+                            <form onSubmit={handleSaveBusinessSwap} className="space-y-5">
+                                <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl flex gap-3 mb-2">
+                                    <div className="bg-white p-1.5 rounded-full text-blue-600 h-fit"><Info size={16}/></div>
+                                    <p className="text-xs text-blue-800 leading-relaxed">
+                                        Esto NO afecta tu ganancia. Úsalo cuando muevas dinero físico al banco o viceversa.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha y Hora</label>
+                                    <div className="relative">
+                                        <input type="datetime-local" className="w-full p-3 pl-10 bg-stone-50 border rounded-xl" value={businessSwapForm.date.slice(0, 16)} onChange={e => setBusinessSwapForm({...businessSwapForm, date: e.target.value})} />
+                                        <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-2 bg-stone-50 p-2 rounded-xl border border-stone-200">
+                                    <button type="button" onClick={() => setBusinessSwapForm({...businessSwapForm, from: 'cash', to: 'transfer'})} className={`flex-1 py-4 rounded-lg font-bold text-xs transition-all flex flex-col items-center gap-2 ${businessSwapForm.from === 'cash' ? 'bg-white shadow-md text-stone-900 ring-1 ring-stone-200' : 'text-stone-400'}`}>
+                                        <span className="flex items-center gap-1 text-stone-500 uppercase text-[10px]">Origen</span>
+                                        <span className="flex items-center gap-1"><Banknote size={16}/> Efvo</span>
+                                        <ArrowDownCircle size={14} className="text-stone-300 mt-1"/>
+                                        <span className="flex items-center gap-1"><CreditCard size={16}/> Digital</span>
+                                        <span className="flex items-center gap-1 text-stone-500 uppercase text-[10px]">Destino</span>
+                                    </button>
+                                    
+                                    <button type="button" onClick={() => setBusinessSwapForm({...businessSwapForm, from: 'transfer', to: 'cash'})} className={`flex-1 py-4 rounded-lg font-bold text-xs transition-all flex flex-col items-center gap-2 ${businessSwapForm.from === 'transfer' ? 'bg-white shadow-md text-stone-900 ring-1 ring-stone-200' : 'text-stone-400'}`}>
+                                        <span className="flex items-center gap-1 text-stone-500 uppercase text-[10px]">Origen</span>
+                                        <span className="flex items-center gap-1"><CreditCard size={16}/> Digital</span>
+                                        <ArrowDownCircle size={14} className="text-stone-300 mt-1"/>
+                                        <span className="flex items-center gap-1"><Banknote size={16}/> Efvo</span>
+                                        <span className="flex items-center gap-1 text-stone-500 uppercase text-[10px]">Destino</span>
+                                    </button>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto a mover</label>
+                                    <input type="number" autoFocus className="w-full p-4 bg-stone-50 border rounded-xl font-mono text-2xl font-bold text-center" value={businessSwapForm.amount} onChange={e => setBusinessSwapForm({...businessSwapForm, amount: e.target.value})} placeholder="$0" />
+                                </div>
+
+                                <button type="submit" disabled={isSaving} className="w-full bg-stone-900 text-white py-4 rounded-xl font-bold shadow-lg shadow-stone-900/20 active:scale-95 transition-transform">
+                                    Confirmar Movimiento
+                                </button>
+                            </form>
+
+                            {/* HISTORIAL DE SWAPS */}
+                            <div className="border-t border-stone-100 pt-4">
+                                <h4 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">Historial de Movimientos</h4>
+                                <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                                    {businessSwaps.length === 0 ? <p className="text-center text-xs text-stone-300 italic py-2">Sin movimientos registrados</p> : 
+                                    businessSwaps.map(s => (
+                                        <div key={s.id} className="bg-stone-50 p-3 rounded-lg flex justify-between items-center text-xs border border-stone-100">
+                                            <div>
+                                                <p className="font-bold text-stone-700 flex items-center gap-2">
+                                                    {s.from === 'cash' ? 'Efectivo' : 'Digital'} 
+                                                    <ArrowRight size={10} className="text-stone-400"/> 
+                                                    {s.to === 'cash' ? 'Efectivo' : 'Digital'}
+                                                </p>
+                                                <p className="text-[10px] text-stone-400 mt-0.5">{new Date(s.date).toLocaleString()}</p>
+                                            </div>
+                                            <span className="font-mono font-bold text-stone-900">${parseFloat(s.amount).toLocaleString()}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </Modal>	
 
                     <ConfirmModal isOpen={confirmModal.isOpen} onClose={() => setConfirmModal({...confirmModal, isOpen: false})} title={confirmModal.title} message={confirmModal.message} onConfirm={confirmModal.onConfirm} isDanger={confirmModal.isDanger} confirmText={confirmModal.confirmText} />
                 </div>
