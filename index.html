@@ -639,7 +639,7 @@
                 setIsSettingsOpen(false);
             };
 
-            // --- COMPUTED DATA ---
+           // --- COMPUTED DATA (VERSION GLOBAL CON ALERTAS DE COLOR) ---
             const changeMonth = (offset) => {
                 const newDate = new Date(currentDate);
                 newDate.setMonth(newDate.getMonth() + offset);
@@ -649,22 +649,61 @@
             const monthLabel = new Intl.DateTimeFormat('es-AR', { month: 'long', year: 'numeric' }).format(currentDate);
             const capitalizedMonth = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
 
-            const filteredOrders = useMemo(() => orders.filter(o => {
+            const filteredOrders = useMemo(() => orders.map(o => {
+                // Primero identificamos si el pedido es de un mes anterior al que estamos viendo
                 const d = new Date(o.date);
+                const isFromPast = d.getFullYear() < currentDate.getFullYear() || 
+                                  (d.getFullYear() === currentDate.getFullYear() && d.getMonth() < currentDate.getMonth());
+                
+                // Agregamos la propiedad isOverdue para usarla en el diseño
+                return { ...o, isOverdue: isFromPast };
+            }).filter(o => {
+                const d = new Date(o.date);
+                
+                // 1. Coincidencia con el mes del calendario
                 const matchesDate = d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear();
+                
+                // 2. Coincidencia con el buscador de texto
                 const matchesSearch = (o.client + o.detail).toLowerCase().includes(searchTerm.toLowerCase());
+                
+                // 3. Lógica de Filtros Operativos (Salto Temporal)
                 let matchesFilter = true;
+                let ignoreDateRestriction = false;
 
-	if (orderFilter === 'todo') matchesFilter = !o.done;
+                switch (orderFilter) {
+                    case 'todo': 
+                        matchesFilter = !o.done;
+                        ignoreDateRestriction = true; 
+                        break;
+                    case 'pending_pay': 
+                        matchesFilter = !o.paid;
+                        ignoreDateRestriction = true; 
+                        break;
+                    case 'pending_delivery': 
+                        matchesFilter = !o.delivered;
+                        ignoreDateRestriction = true; 
+                        break;
+                    case 'important': 
+                        matchesFilter = o.important;
+                        ignoreDateRestriction = true; 
+                        break;
+                    case 'done': 
+                        matchesFilter = o.done;
+                        break;
+                    case 'delivered': 
+                        matchesFilter = o.delivered;
+                        break;
+                    case 'all':
+                    default:
+                        matchesFilter = true;
+                        break;
+                }
 
-                if (orderFilter === 'pending_pay') matchesFilter = !o.paid;
-                if (orderFilter === 'pending_delivery') matchesFilter = !o.delivered;
-
-	if (orderFilter === 'done') matchesFilter = o.done;   // <--- ESTA ES LA NUEVA
-
-                if (orderFilter === 'delivered') matchesFilter = o.delivered;
-                if (orderFilter === 'important') matchesFilter = o.important;
-                return matchesDate && matchesSearch && matchesFilter;
+                if (ignoreDateRestriction) {
+                    return matchesSearch && matchesFilter;
+                } else {
+                    return matchesDate && matchesSearch && matchesFilter;
+                }
             }), [orders, currentDate, searchTerm, orderFilter]);
 
             // Client Stats Logic
@@ -674,7 +713,6 @@
                 const spent = clientOrders.reduce((acc, o) => acc + o.price, 0);
                 const debt = clientOrders.filter(o => !o.paid).reduce((acc, o) => acc + o.price, 0);
                 
-                // Top Category
                 const cats = {};
                 clientOrders.forEach(o => {
                     const cat = identifyCategory(o.detail);
@@ -698,7 +736,6 @@
                 }).filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
             }, [clients, orders, clientSort, searchTerm]);
 
-            // Global Client Stats for Report Modal
             const globalClientStats = useMemo(() => {
                 const allWithStats = clients.map(c => ({...c, stats: getClientStats(c.name)}));
                 const totalDebt = allWithStats.reduce((acc, c) => acc + c.stats.debt, 0);
@@ -1454,7 +1491,7 @@ const handleDoneConfirm = async () => {
                         </div>
                     </aside>
 
-                    {/* --- MAIN CONTENT --- */}
+{/* --- MAIN CONTENT (BLOQUE COMPLETO CORREGIDO) --- */}
                     <main className="flex-1 flex flex-col h-full overflow-hidden relative">
                         {/* Top Bar Mobile */}
                         <div className="md:hidden bg-[#0c0a09] p-4 flex justify-between items-center shrink-0 z-30">
@@ -1482,16 +1519,16 @@ const handleDoneConfirm = async () => {
                                 )}
                             </div>
 
-                           {activeTab === 'orders' && (
+                            {/* PESTAÑA PEDIDOS (CORREGIDA Y CON COLORES DE ALERTA) */}
+                            {activeTab === 'orders' && (
                                 <div className="space-y-6 animate-in fade-in duration-300">
-                                    {/* Stats Cards - ACTUALIZADO A 5 COLUMNAS */}
+                                    {/* Stats Cards */}
                                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
                                         <div className="bg-white p-4 md:p-5 rounded-2xl border border-stone-100 shadow-sm">
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Ventas Totales</p>
                                             <p className="text-xl md:text-2xl font-bold text-stone-900">${filteredOrders.reduce((acc,o) => acc + o.price, 0).toLocaleString()}</p>
                                         </div>
 
-                                        {/* NUEVA TARJETA: POR HACER */}
                                         <div className="bg-white p-4 md:p-5 rounded-2xl border border-stone-100 shadow-sm">
                                             <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-1">Por Hacer</p>
                                             <p className="text-xl md:text-2xl font-bold text-purple-600">{filteredOrders.filter(o=>!o.done).length}</p>
@@ -1512,7 +1549,7 @@ const handleDoneConfirm = async () => {
                                         </div>
                                     </div>
 
-                                    {/* Filters - ACTUALIZADO CON BOTÓN "POR HACER" */}
+                                    {/* Filters */}
                                     <div className="flex flex-col md:flex-row gap-4">
                                         <div className="relative flex-1">
                                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
@@ -1533,7 +1570,7 @@ const handleDoneConfirm = async () => {
                                         </div>
                                     </div>
 
-                                    {/* List */}
+                                    {/* List - CON ALERTAS DE COLOR PARA PEDIDOS ATRASADOS */}
                                     <div className="space-y-3">
                                         {filteredOrders.length === 0 ? 
                                             <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-stone-200">
@@ -1541,7 +1578,11 @@ const handleDoneConfirm = async () => {
                                                 <p className="text-stone-400">No se encontraron pedidos</p>
                                             </div> 
                                         : filteredOrders.map(order => (
-                                            <div key={order.id} className={`bg-white p-5 rounded-2xl border transition-all hover:shadow-lg group ${order.important ? 'border-amber-200 bg-amber-50/10' : 'border-stone-100'}`}>
+                                            <div key={order.id} 
+                                                className={`bg-white p-5 rounded-2xl border transition-all hover:shadow-lg group 
+                                                ${order.important ? 'border-amber-200 bg-amber-50/10' : 
+                                                  order.isOverdue ? 'border-red-200 bg-red-50/40 shadow-[0_0_15px_rgba(239,68,68,0.1)]' : 'border-stone-100'}`}>
+                                                
                                                 <div className="flex justify-between items-start mb-3">
                                                     <div className="flex items-center gap-4">
                                                         <SmartIcon iconName={getSmartIconName(order.detail)} color={generateColorFromText(order.detail)} />
@@ -1550,7 +1591,14 @@ const handleDoneConfirm = async () => {
                                                                 <h3 className="font-bold text-stone-900 text-lg leading-tight">{order.client}</h3>
                                                                 {order.quantity > 1 && <span className="bg-stone-100 text-stone-600 text-[10px] font-bold px-1.5 py-0.5 rounded">x{order.quantity} unid.</span>}
                                                             </div>
-                                                            <p className="text-xs text-stone-400 uppercase tracking-wide mt-0.5">{new Date(order.date).toLocaleDateString()}</p>
+                                                            <div className="flex items-center gap-2 mt-0.5">
+                                                                <p className="text-xs text-stone-400 uppercase tracking-wide">{new Date(order.date).toLocaleDateString()}</p>
+                                                                {order.isOverdue && (
+                                                                    <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded shadow-sm animate-pulse">
+                                                                        MES ANTERIOR
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                     <div className="flex gap-2">
@@ -1562,9 +1610,8 @@ const handleDoneConfirm = async () => {
                                                 <div className="pl-[4.5rem]">
                                                     <p className="text-stone-600 text-sm mb-4 font-medium">{order.detail}</p>
                                                     
-                                                    {/* --- NUEVO: BARRA DE PROGRESO DE PAGO --- */}
                                                     {(!order.paid && order.amountPaid > 0) && (
-                                                        <div className="mb-4 bg-stone-50 p-3 rounded-xl border border-stone-100">
+                                                        <div className="mb-4 bg-white/50 p-3 rounded-xl border border-stone-100">
                                                             <div className="flex justify-between items-end mb-1">
                                                                 <span className="text-xs font-bold text-stone-500">Abonado: <span className="text-emerald-600">${order.amountPaid.toLocaleString()}</span></span>
                                                                 <span className="text-xs font-bold text-red-500">Resta: ${(order.price - order.amountPaid).toLocaleString()}</span>
@@ -1574,7 +1621,6 @@ const handleDoneConfirm = async () => {
                                                             </div>
                                                         </div>
                                                     )}
-                                                    {/* ---------------------------------------- */}
 
                                                     <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-stone-50">
                                                         <div className="flex items-center gap-2">
@@ -1587,7 +1633,6 @@ const handleDoneConfirm = async () => {
                                                             )}
                                                         </div>
                                                         <div className="flex gap-2">
-                                                            {/* Botón de Cobrar actualizado */}
                                                             <button onClick={() => toggleStatus(order, 'paid')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${order.paid ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : (order.amountPaid > 0 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-stone-400 border-stone-200 hover:border-stone-300')}`}>
                                                                 {order.paid ? <CheckCircle2 size={14}/> : <Circle size={14}/>} 
                                                                 {order.paid ? 'Pagado' : (order.amountPaid > 0 ? 'Resto' : 'Cobrar')}
@@ -1757,11 +1802,13 @@ const handleDoneConfirm = async () => {
                                 </div>
                             )}
 
+{/* PESTAÑA FINANZAS (CON SALDO ACUMULADO REAL) */}
 {activeTab === 'finances' && (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
         
-        {/* LÓGICA INTERNA */}
+        {/* LÓGICA DE INTERFAZ ACTUALIZADA - SALDO REAL ACUMULADO */}
         {(() => {
+            // 1. Filtramos los movimientos SOLO para la lista visual del mes seleccionado
             const filteredMovements = finances.movements.filter(m => {
                 if (financeFilter === 'all') return true;
                 if (financeFilter === 'expenses') return m.type === 'expense';
@@ -1774,6 +1821,7 @@ const handleDoneConfirm = async () => {
                 return true;
             });
 
+            // 2. Resumen del mes actual (Solo lo que ocurre en este periodo)
             const currentViewIncome = filteredMovements.filter(m => m.type === 'income').reduce((acc, m) => acc + m.amount, 0);
             const currentViewExpense = filteredMovements.filter(m => m.type === 'expense').reduce((acc, m) => acc + m.amount, 0);
             const currentViewNet = currentViewIncome - currentViewExpense;
@@ -1782,19 +1830,9 @@ const handleDoneConfirm = async () => {
             const totalLaboral = allMonthExpenses.filter(m => m.category !== 'personal').reduce((acc, m) => acc + m.amount, 0);
             const totalPersonal = allMonthExpenses.filter(m => m.category === 'personal').reduce((acc, m) => acc + m.amount, 0);
 
-            const currentViewCash = filteredMovements.reduce((acc, m) => {
-                let val = 0;
-                if (m.paymentMethod === 'mixed' && m.paymentDetails) val = parseFloat(m.paymentDetails.cash) || 0;
-                else if (m.paymentMethod === 'cash' || !m.paymentMethod) val = m.amount;
-                return m.type === 'income' ? acc + val : acc - val;
-            }, 0);
-
-            const currentViewTransfer = filteredMovements.reduce((acc, m) => {
-                let val = 0;
-                if (m.paymentMethod === 'mixed' && m.paymentDetails) val = parseFloat(m.paymentDetails.transfer) || 0;
-                else if (m.paymentMethod === 'transfer') val = m.amount;
-                return m.type === 'income' ? acc + val : acc - val;
-            }, 0);
+            // 3. SALDOS REALES HISTÓRICOS (Consolidan la información mes a mes)
+            const realCashBalance = finances.totalCash;
+            const realTransferBalance = finances.totalTransfer;
 
             let displayLabel = 'Balance del Mes';
             if (financeFilter === 'cash') displayLabel = 'Balance Efectivo';
@@ -1819,32 +1857,29 @@ const handleDoneConfirm = async () => {
 
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-8 border-t border-stone-800 pt-6">
                                     <div>
-                                        <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">Ingresos</p>
+                                        <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">Ingresos Mes</p>
                                         <p className="font-bold text-emerald-400 text-lg">+${currentViewIncome.toLocaleString()}</p>
                                     </div>
                                     <div>
-                                        <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">Gastos</p>
+                                        <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">Gastos Mes</p>
                                         <p className="font-bold text-red-400 text-lg">-${currentViewExpense.toLocaleString()}</p>
                                     </div>
-                                    {(financeFilter === 'all' || financeFilter === 'mixed') && (
-                                        <>
-                                            <div className="hidden md:block w-px bg-stone-800 absolute h-10 left-1/2"></div>
-                                            <div>
-                                                <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">En Caja (Efvo)</p>
-                                                <p className="font-bold text-stone-300 text-lg">${currentViewCash.toLocaleString()}</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] text-stone-500 uppercase font-bold mb-1">En Banco (Dig)</p>
-                                                <p className="font-bold text-stone-300 text-lg">${currentViewTransfer.toLocaleString()}</p>
-                                            </div>
-                                        </>
-                                    )}
+                                    
+                                    <div className="hidden md:block w-px bg-stone-800 absolute h-10 left-1/2"></div>
+                                    
+                                    {/* SALDOS REALES ACUMULADOS */}
+                                    <div>
+                                        <p className="text-[10px] text-amber-500 uppercase font-bold mb-1">En Caja (Efectivo)</p>
+                                        <p className="font-bold text-stone-300 text-lg">${realCashBalance.toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] text-blue-500 uppercase font-bold mb-1">En Banco (Digital)</p>
+                                        <p className="font-bold text-stone-300 text-lg">${realTransferBalance.toLocaleString()}</p>
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* --- SECCIÓN DE BOTONES ACTUALIZADA --- */}
                             <div className="flex md:flex-col gap-3 justify-end min-w-[160px]">
-                                {/* Botones Operativos (Arriba) */}
                                 <div className="flex gap-2 w-full">
                                      <button onClick={() => { setEditingFinanceId(null); setIncomeForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}); setIsIncomeModalOpen(true); }} 
                                         className="flex-1 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-400 py-3 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 border border-emerald-800/50 transition-all">
@@ -1856,22 +1891,17 @@ const handleDoneConfirm = async () => {
                                     </button>
                                 </div>
 
-                                {/* Botones de Gestión (Abajo) */}
                                 <div className="flex gap-2 w-full mt-1">
-                                    {/* BOTÓN ALCANCÍA (AHORROS) */}
                                     <button onClick={() => setIsSavingsModalOpen(true)} 
                                         className="flex-[2] bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 border border-amber-600 shadow-lg shadow-amber-900/20 transition-all active:scale-95">
                                         <PiggyBank size={18} /> AHORROS
                                     </button>
-
-                                    {/* BOTÓN MOVIMIENTOS INTERNOS (NEGOCIO) */}
                                     <button onClick={() => setIsBusinessSwapModalOpen(true)} 
-                                        className="flex-1 bg-stone-700 hover:bg-stone-600 text-stone-200 py-3 rounded-xl font-bold flex items-center justify-center border border-stone-600 shadow-lg transition-all active:scale-95" title="Mover dinero interno (Caja <-> Banco)">
+                                        className="flex-1 bg-stone-700 hover:bg-stone-600 text-stone-200 py-3 rounded-xl font-bold flex items-center justify-center border border-stone-600 shadow-lg transition-all active:scale-95" title="Mover dinero interno">
                                         <ArrowLeftRight size={18} />
                                     </button>
                                 </div>
                             </div>
-                            {/* ---------------------------------------- */}
                         </div>
                     </div>
 
@@ -1881,52 +1911,45 @@ const handleDoneConfirm = async () => {
                             <button onClick={() => setFinanceFilter(financeFilter === 'expenses_work' ? 'expenses' : 'expenses_work')} 
                                 className={`relative p-5 rounded-2xl border transition-all text-left group overflow-hidden ${financeFilter === 'expenses_work' ? 'bg-stone-800 text-white border-stone-800 shadow-xl' : 'bg-white border-stone-100 hover:border-stone-300 text-stone-800 hover:shadow-md'}`}>
                                 <div className="relative z-10">
-                                    <div className={`flex items-center gap-2 mb-2 ${financeFilter === 'expenses_work' ? 'text-stone-400' : 'text-stone-400'}`}>
+                                    <div className="flex items-center gap-2 mb-2 text-stone-400">
                                         <Briefcase size={16}/> <span className="text-[10px] font-bold uppercase tracking-widest">Gastos Laborales</span>
                                     </div>
                                     <span className="text-2xl font-bold tracking-tight">${totalLaboral.toLocaleString()}</span>
                                 </div>
-                                {financeFilter === 'expenses_work' && <div className="absolute right-4 top-4 w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>}
                             </button>
                             
                             <button onClick={() => setFinanceFilter(financeFilter === 'expenses_personal' ? 'expenses' : 'expenses_personal')} 
                                 className={`relative p-5 rounded-2xl border transition-all text-left group overflow-hidden ${financeFilter === 'expenses_personal' ? 'bg-amber-900 text-white border-amber-900 shadow-xl' : 'bg-white border-stone-100 hover:border-stone-300 text-stone-800 hover:shadow-md'}`}>
                                 <div className="relative z-10">
-                                    <div className={`flex items-center gap-2 mb-2 ${financeFilter === 'expenses_personal' ? 'text-amber-200' : 'text-stone-400'}`}>
+                                    <div className="flex items-center gap-2 mb-2 text-amber-200">
                                         <User size={16}/> <span className="text-[10px] font-bold uppercase tracking-widest">Gastos Personales</span>
                                     </div>
                                     <span className="text-2xl font-bold tracking-tight">${totalPersonal.toLocaleString()}</span>
                                 </div>
-                                {financeFilter === 'expenses_personal' && <div className="absolute right-4 top-4 w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>}
                             </button>
                         </div>
                     )}
 
-                    {/* 3. BARRA DE FILTROS (AHORA CON MIXTO) */}
+                    {/* 3. BARRA DE FILTROS */}
                     <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-stone-200 pb-4 mt-2">
                         <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar w-full md:w-auto">
                              <button onClick={() => setFinanceFilter('all')} className={`px-5 py-2 rounded-full text-xs font-bold transition-all border ${financeFilter === 'all' ? 'bg-stone-900 text-white border-stone-900 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>Todo</button>
-                             
                              <div className="w-px h-6 bg-stone-300 mx-1 self-center opacity-50"></div>
-                             
                              <button onClick={() => setFinanceFilter('expenses')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'expenses' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>Gastos</button>
                              <button onClick={() => setFinanceFilter('cash')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'cash' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><Banknote size={14}/> Efvo</button>
                              <button onClick={() => setFinanceFilter('transfer')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'transfer' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><CreditCard size={14}/> Dig</button>
-                             
-                             {/* BOTÓN MIXTO AGREGADO AQUÍ */}
                              <button onClick={() => setFinanceFilter('mixed')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'mixed' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><Grid size={14}/> Mixto</button>
                         </div>
                         <p className="text-[10px] text-stone-400 font-bold uppercase tracking-widest">{filteredMovements.length} REGISTROS</p>
                     </div>
 
-                    {/* 4. LISTA DE MOVIMIENTOS */}
+                    {/* 4. LISTA DE MOVIMIENTOS DEL MES */}
                     <div className="space-y-3 pb-12">
                         {filteredMovements.map((m, i) => (
                             <div key={i} className="bg-white p-4 rounded-2xl border border-stone-100 flex justify-between items-center group hover:shadow-md transition-all hover:border-stone-200">
                                 <div>
                                     <div className="flex items-center gap-2 mb-1">
                                         <span className="text-[10px] font-mono text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded">{new Date(m.date).toLocaleDateString()}</span>
-                                        {/* Etiquetas de tipo */}
                                         {m.type === 'expense' ? (
                                             m.category === 'personal' 
                                             ? <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded"><User size={10}/> Personal</span>
@@ -1934,11 +1957,9 @@ const handleDoneConfirm = async () => {
                                         ) : (
                                             <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Ingreso</span>
                                         )}
-                                        {m.paymentMethod === 'mixed' && <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">Mixto</span>}
                                     </div>
                                     <p className="font-bold text-stone-800 text-sm">{m.desc}</p>
                                 </div>
-                                
                                 <div className="text-right">
                                     <p className={`text-lg font-bold ${m.type === 'income' ? 'text-emerald-600' : 'text-red-500'}`}>
                                         {m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}
@@ -1950,7 +1971,7 @@ const handleDoneConfirm = async () => {
                                 </div>
                             </div>
                         ))}
-                        {filteredMovements.length === 0 && <div className="py-12 text-center border-2 border-dashed border-stone-100 rounded-2xl"><p className="text-stone-300 font-medium">No hay movimientos</p></div>}
+                        {filteredMovements.length === 0 && <div className="py-12 text-center border-2 border-dashed border-stone-100 rounded-2xl"><p className="text-stone-300 font-medium">No hay movimientos este mes</p></div>}
                     </div>
                 </>
             );
