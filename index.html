@@ -726,7 +726,7 @@
                 return { cash, digital, total: cash + digital };
             }, [savingsLogs]);
 
-            // 2. FINANZAS DEL NEGOCIO (CON MOVIMIENTOS INTERNOS)
+           // 2. FINANZAS DEL NEGOCIO (SALDO HISTÓRICO ACUMULADO)
             const finances = useMemo(() => {
                 const isCurrentMonth = (dateStr) => {
                     const d = new Date(dateStr);
@@ -742,6 +742,7 @@
                     paymentDetails: item.paymentDetails || null
                 });
 
+                // --- RECOLECCIÓN DE TODOS LOS MOVIMIENTOS ---
                 const orderMovements = [];
                 orders.forEach(o => {
                     if (o.paymentHistory && o.paymentHistory.length > 0) {
@@ -758,28 +759,10 @@
                     }
                 });
 
-                // --- CALCULAR MOVIMIENTOS INTERNOS (SWAPS) ---
-                let swapToCash = 0;
-                let swapToTransfer = 0;
+                const allExpenses = expenses.map(e => mapFinanceItem(e, 'expense', 'expenses'));
+                const allIncomes = incomes.map(i => mapFinanceItem(i, 'income', 'extra_incomes'));
 
-                businessSwaps.forEach(s => {
-                    const amt = parseFloat(s.amount) || 0;
-                    if (s.to === 'cash') {
-                        swapToCash += amt;      
-                        swapToTransfer -= amt;  
-                    } else {
-                        swapToTransfer += amt;  
-                        swapToCash -= amt;      
-                    }
-                });
-
-                const monthMovements = orderMovements.filter(m => isCurrentMonth(m.date));
-                const monthExpenses = expenses.filter(e => isCurrentMonth(e.date)).map(e => mapFinanceItem(e, 'expense', 'expenses'));
-                const monthIncomes = incomes.filter(i => isCurrentMonth(i.date)).map(i => mapFinanceItem(i, 'income', 'extra_incomes'));
-
-                const incomeVal = monthMovements.reduce((acc, m) => acc + m.amount, 0) + monthIncomes.reduce((acc, i) => acc + i.amount, 0);
-                const expenseVal = monthExpenses.reduce((acc, e) => acc + e.amount, 0);
-
+                // --- LÓGICA DE SUMA POR MÉTODO (PARA SALDO HISTÓRICO) ---
                 const sumByMethod = (items, targetMethod) => items.reduce((sum, item) => {
                     if (item.paymentMethod === 'mixed' && item.paymentDetails) {
                         return sum + (parseFloat(item.paymentDetails[targetMethod]) || 0);
@@ -790,27 +773,42 @@
                     return sum;
                 }, 0);
 
-                const allOrderMovements = orderMovements;
-                const allExpenses = expenses.map(e => mapFinanceItem(e, 'expense', 'expenses'));
-                const allIncomes = incomes.map(i => mapFinanceItem(i, 'income', 'extra_incomes'));
+                // --- CÁLCULO DE SALDOS TOTALES (ACUMULADO HISTÓRICO) ---
+                // Aquí sumamos todos los movimientos de la historia para que el saldo se conserve mes a mes
+                const rawCash = (sumByMethod(orderMovements, 'cash') + sumByMethod(allIncomes, 'cash')) - sumByMethod(allExpenses, 'cash');
+                const rawTransfer = (sumByMethod(orderMovements, 'transfer') + sumByMethod(allIncomes, 'transfer')) - sumByMethod(allExpenses, 'transfer');
 
-                // --- CÁLCULO DE SALDOS ACTUALIZADO CON SWAPS ---
-                const rawCash = (sumByMethod(allOrderMovements, 'cash') + sumByMethod(allIncomes, 'cash')) - sumByMethod(allExpenses, 'cash');
-                const rawTransfer = (sumByMethod(allOrderMovements, 'transfer') + sumByMethod(allIncomes, 'transfer')) - sumByMethod(allExpenses, 'transfer');
+                // Aplicamos Swaps históricos
+                let totalSwapToCash = 0;
+                let totalSwapToTransfer = 0;
+                businessSwaps.forEach(s => {
+                    const amt = parseFloat(s.amount) || 0;
+                    if (s.to === 'cash') {
+                        totalSwapToCash += amt;
+                        totalSwapToTransfer -= amt;
+                    } else {
+                        totalSwapToTransfer += amt;
+                        totalSwapToCash -= amt;
+                    }
+                });
 
-                const totalCash = rawCash + swapToCash;         
-                const totalTransfer = rawTransfer + swapToTransfer; 
+                const totalCash = rawCash + totalSwapToCash;
+                const totalTransfer = rawTransfer + totalSwapToTransfer;
 
+                // --- FILTRADO SOLO PARA LA VISTA DEL MES SELECCIONADO ---
+                const monthMovements = orderMovements.filter(m => isCurrentMonth(m.date));
+                const monthExpenses = allExpenses.filter(e => isCurrentMonth(e.date));
+                const monthIncomes = allIncomes.filter(i => isCurrentMonth(i.date));
+
+                const incomeVal = monthMovements.reduce((acc, m) => acc + m.amount, 0) + monthIncomes.reduce((acc, i) => acc + i.amount, 0);
+                const expenseVal = monthExpenses.reduce((acc, e) => acc + e.amount, 0);
                 const movements = [...monthMovements, ...monthIncomes, ...monthExpenses].sort((a, b) => new Date(b.date) - new Date(a.date));
 
                 return { incomeVal, expenseVal, net: incomeVal - expenseVal, totalCash, totalTransfer, totalBalance: totalCash + totalTransfer, movements };
             }, [orders, expenses, incomes, currentDate, businessSwaps]);
 
             const stats = useMemo(() => {
-                // Lógica de estadísticas actualizada para contar PAGOS REALES (incluyendo parciales)
                 const currentYear = currentDate.getFullYear();
-                
-                // Recolectar todos los pagos del año (Parciales y Totales)
                 const yearPayments = [];
                 orders.forEach(o => {
                     if (o.paymentHistory && o.paymentHistory.length > 0) {
@@ -825,7 +823,6 @@
                 });
 
                 const totalRevenue = yearPayments.reduce((acc, p) => acc + p.amount, 0);
-                
                 const chartData = [];
                 const months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
                 months.forEach((m, i) => {
@@ -834,7 +831,6 @@
                 });
 
                 const counts = {};
-                // Para las categorías seguimos usando pedidos creados/pagados este año
                 const yearOrders = orders.filter(o => (o.paid || (o.amountPaid > 0)) && new Date(o.date).getFullYear() === currentYear);
                 yearOrders.forEach(o => {
                     const cat = identifyCategory(o.detail);
