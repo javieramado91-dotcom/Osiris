@@ -390,7 +390,7 @@
                         </div>
                     </div>
                 </div>
-           );  // <--- AGREGAR ESTO (Paréntesis y punto y coma)
+         ); 
         };
 		
         const Toast = ({ message, type, onClose }) => {
@@ -489,7 +489,16 @@
             const [editingFinanceId, setEditingFinanceId] = useState(null);
             
             const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
-            const [incomeForm, setIncomeForm] = useState({ description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString() });
+           const [incomeForm, setIncomeForm] = useState({ 
+    description: '', 
+    amount: '', 
+    method: 'cash', 
+    mixedCash: '', 
+    mixedTransfer: '', 
+    date: new Date().toISOString(),
+    isSavingsWithdrawal: false, // <--- Esto es lo que falta
+    savingsSource: 'cash'       // <--- Esto es lo que falta
+});
 
             // DEBT STATES - ACTUALIZADO
             const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
@@ -525,6 +534,12 @@
             const [connectionStatus, setConnectionStatus] = useState('checking');
 			const [financeFilter, setFinanceFilter] = useState('all');
 			
+			const [financeSearch, setFinanceSearch] = useState('');
+            const [financeDateSearch, setFinanceDateSearch] = useState('');
+			
+			// Estado para el Reporte Diario
+            const [isDailyReportOpen, setIsDailyReportOpen] = useState(false);
+			
 			// --- NUEVOS ESTADOS PARA AHORROS Y MOVIMIENTOS ---
             const [savingsLogs, setSavingsLogs] = useState([]); 
             const [isSavingsModalOpen, setIsSavingsModalOpen] = useState(false);
@@ -536,6 +551,16 @@
                 destination: 'cash', // A donde va en Ahorros: 'cash' o 'transfer'
                 source: 'external',  // De donde viene: 'external' o 'business'
                 businessAccount: 'cash', // Si viene del negocio: ¿De 'cash' o 'transfer'?
+                date: new Date().toISOString()
+            });
+			
+			// Estado para el Modal de Retiro de Ahorros
+            const [isSavingsWithdrawalModalOpen, setIsSavingsWithdrawalModalOpen] = useState(false);
+            const [savingsWithdrawalForm, setSavingsWithdrawalForm] = useState({
+                amount: '',
+                source: 'cash', // ¿De qué alcancía sale? (cash/transfer)
+                destination: 'personal', // ¿Para qué es? (personal/business)
+                detail: '',
                 date: new Date().toISOString()
             });
 
@@ -749,16 +774,23 @@
             }, [clients, orders]);
 
 
-           // 1. CALCULO SALDO ALCANCÍA
+           // 1. CALCULO SALDO ALCANCÍA (ACTUALIZADO)
             const savingsBalance = useMemo(() => {
                 let cash = 0;
                 let digital = 0;
                 savingsLogs.forEach(log => {
                     const amt = parseFloat(log.amount) || 0;
+                    
+                    // CASO 1: SUMAR DEPOSITOS
                     if (log.type === 'deposit') {
                         if (log.destination === 'cash') cash += amt;
                         if (log.destination === 'transfer') digital += amt;
                     } 
+                    // CASO 2: RESTAR RETIROS (LO NUEVO)
+                    else if (log.type === 'withdrawal') {
+                        if (log.source === 'cash') cash -= amt;      // Si salió de la caja de ahorros
+                        if (log.source === 'transfer') digital -= amt;  // Si salió del banco de ahorros
+                    }
                 });
                 return { cash, digital, total: cash + digital };
             }, [savingsLogs]);
@@ -1364,7 +1396,7 @@ const handleDoneConfirm = async () => {
 			
 			// --- NUEVAS FUNCIONES DE GUARDADO ---
 
-            // 1. GUARDAR DEPOSITO EN AHORRO
+        // 1. GUARDAR DEPOSITO EN AHORRO (ACTUALIZADO)
             const handleSaveSavingsDeposit = async (e) => {
                 e.preventDefault();
                 setIsSaving(true);
@@ -1385,15 +1417,15 @@ const handleDoneConfirm = async () => {
                         createdAt: new Date().toISOString()
                     });
 
-                    // B. Si sale del negocio -> Crear Gasto Automático
+                    // B. Si sale del negocio -> Crear Gasto Automático con categoría 'ahorro'
                     if (savingsForm.source === 'business') {
                         const expenseRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'));
                         batch.set(expenseRef, {
-                            description: `Retiro a Ahorros (${savingsForm.destination === 'cash' ? 'Efectivo' : 'Digital'})`,
+                            description: `Ahorro (${savingsForm.destination === 'cash' ? 'Efectivo' : 'Digital'})`, 
                             amount: amount,
                             date: savingsForm.date,
-                            method: savingsForm.businessAccount, // Sale de la cuenta elegida del negocio
-                            category: 'personal', // Se marca como retiro personal
+                            method: savingsForm.businessAccount,
+                            category: 'ahorro', // <--- ESTO ES LA CLAVE PARA EL COLOR
                             createdAt: new Date().toISOString()
                         });
                     }
@@ -1437,7 +1469,155 @@ const handleDoneConfirm = async () => {
                     setIsSaving(false);
                 }
             };
+			
+			// 3. GUARDAR INGRESO (Código faltante que soluciona el error)
+            const handleSaveIncome = async (e) => {
+                e.preventDefault();
+                setIsSaving(true);
+                try {
+                    const batch = writeBatch(db);
+                    
+                    let incomeRef;
+                    if (editingFinanceId) {
+                        incomeRef = doc(db, 'artifacts', appId, 'public', 'data', 'extra_incomes', editingFinanceId);
+                    } else {
+                        incomeRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'extra_incomes'));
+                    }
 
+                    const incomeData = {
+                        description: incomeForm.description,
+                        amount: parseFloat(incomeForm.amount),
+                        date: incomeForm.date,
+                        method: incomeForm.method, 
+                        paymentMethod: incomeForm.method,
+                        type: 'income',
+                        category: 'laboral', 
+                        isSavingsWithdrawal: incomeForm.isSavingsWithdrawal || false,
+                        createdAt: new Date().toISOString()
+                    };
+
+                    if (incomeForm.method === 'mixed') {
+                        incomeData.paymentDetails = {
+                            cash: parseFloat(incomeForm.mixedCash) || 0,
+                            transfer: parseFloat(incomeForm.mixedTransfer) || 0
+                        };
+                    }
+
+                    if (!incomeForm.isSavingsWithdrawal) {
+                        if (editingFinanceId) {
+                            await updateDoc(incomeRef, incomeData);
+                        } else {
+                            await setDoc(incomeRef, incomeData);
+                        }
+                    } else {
+                        batch.set(incomeRef, incomeData);
+                        const logRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_logs'));
+                        batch.set(logRef, {
+                            type: 'withdrawal',
+                            amount: parseFloat(incomeForm.amount),
+                            source: incomeForm.savingsSource, 
+                            destination: 'business', 
+                            date: incomeForm.date,
+                            createdAt: new Date().toISOString()
+                        });
+                        await batch.commit();
+                    }
+
+                    addToast(editingFinanceId ? 'Ingreso actualizado' : 'Ingreso registrado');
+                    setIsIncomeModalOpen(false);
+                    setIncomeForm({ description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString(), isSavingsWithdrawal: false, savingsSource: 'cash' });
+                    setEditingFinanceId(null);
+
+                } catch (error) {
+                    console.error(error);
+                    addToast('Error al guardar ingreso', 'error');
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+			
+			// 4. ELIMINAR REGISTRO DE AHORRO
+            const handleDeleteSavingsLog = async (id) => {
+                setConfirmModal({
+                    isOpen: true, 
+                    title: 'Eliminar Registro', 
+                    message: '¿Borrar este movimiento de la alcancía? El saldo se recalculará.', 
+                    isDanger: true, 
+                    confirmText: 'Eliminar',
+                    onConfirm: async () => {
+                        try { 
+                            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_logs', id)); 
+                            addToast('Movimiento eliminado'); 
+                        } catch(e) { 
+                            addToast('Error al eliminar', 'error'); 
+                        }
+                    }
+                });
+            };
+
+            // 5. GUARDAR RETIRO DE AHORRO (GASTO PERSONAL)
+            const handleSaveSavingsWithdrawal = async (e) => {
+                e.preventDefault();
+                setIsSaving(true);
+                try {
+                    const amount = parseFloat(savingsWithdrawalForm.amount);
+                    if (!amount || amount <= 0) throw new Error("Monto inválido");
+
+                    const batch = writeBatch(db);
+
+                    // A. Registrar la SALIDA en el log de ahorros
+                    const logRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_logs'));
+                    batch.set(logRef, {
+                        type: 'withdrawal', // Importante para que reste
+                        amount: amount,
+                        source: savingsWithdrawalForm.source, // 'cash' o 'transfer' (LA CUENTA DE ORIGEN)
+                        destination: savingsWithdrawalForm.destination, // 'personal' o 'business'
+                        detail: savingsWithdrawalForm.detail || 'Retiro',
+                        date: savingsWithdrawalForm.date,
+                        createdAt: new Date().toISOString()
+                    });
+
+                    // B. Si es Gasto Personal -> Crear Gasto en Finanzas automáticamente
+                    if (savingsWithdrawalForm.destination === 'personal') {
+                        const expenseRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'));
+                        batch.set(expenseRef, {
+                            description: `(Desde Ahorros) ${savingsWithdrawalForm.detail || 'Gasto Personal'}`,
+                            amount: amount,
+                            date: savingsWithdrawalForm.date,
+                            method: savingsWithdrawalForm.source, // Mantiene coherencia de método
+                            category: 'personal', // <--- CLAVE: Se marca como personal
+                            createdAt: new Date().toISOString()
+                        });
+                    }
+                    
+                    // C. Si es vuelta al Negocio (Inyección) -> Crear Ingreso Extra
+                    if (savingsWithdrawalForm.destination === 'business') {
+                         const incomeRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'extra_incomes'));
+                         batch.set(incomeRef, {
+                            description: `Inyección desde Ahorros`,
+                            amount: amount,
+                            date: savingsWithdrawalForm.date,
+                            method: savingsWithdrawalForm.source,
+                            type: 'income',
+                            category: 'laboral',
+                            isSavingsWithdrawal: true, // Marca especial
+                            createdAt: new Date().toISOString()
+                        });
+                    }
+
+                    await batch.commit();
+                    addToast('Retiro registrado correctamente');
+                    setIsSavingsWithdrawalModalOpen(false);
+                    setSavingsWithdrawalForm({ amount: '', source: 'cash', destination: 'personal', detail: '', date: new Date().toISOString() });
+
+                } catch (error) {
+                    console.error(error);
+                    addToast('Error al registrar retiro', 'error');
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+			
             if (!isConfigured) return <ConfigErrorScreen />;
       
 			if (isLocked) return <LoginScreen onLogin={handleLogin} />;
@@ -1504,13 +1684,14 @@ const handleDoneConfirm = async () => {
 
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 md:max-w-7xl md:mx-auto w-full pb-24 md:pb-8">
                             
-                            {/* Header Section */}
+                        {/* Header Section */}
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
                                 <div>
                                     <h2 className="text-2xl md:text-3xl font-bold text-stone-900 brand-font">Vestite para ganar.</h2>
                                     <p className="text-stone-500 mt-1 flex items-center gap-2 text-sm"><Calendar size={14}/> {capitalizedMonth}</p>
                                 </div>
-                                {activeTab === 'orders' && (
+                                {/* BOTONES DE MES (VISIBLES EN PEDIDOS Y FINANZAS) */}
+                                {(activeTab === 'orders' || activeTab === 'finances') && (
                                 <div className="flex items-center bg-white p-1.5 rounded-xl shadow-sm border border-stone-200">
                                     <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-stone-100 rounded-lg text-stone-400 hover:text-stone-800 transition-colors"><ChevronLeft size={20}/></button>
                                     <div className="w-px h-6 bg-stone-200 mx-1"></div>
@@ -1808,17 +1989,35 @@ const handleDoneConfirm = async () => {
         
         {/* LÓGICA DE INTERFAZ ACTUALIZADA - SALDO REAL ACUMULADO */}
         {(() => {
-            // 1. Filtramos los movimientos SOLO para la lista visual del mes seleccionado
+           // 1. Filtramos los movimientos (ACTUALIZADO CON BÚSQUEDA, FECHA Y FILTRO AHORROS)
             const filteredMovements = finances.movements.filter(m => {
-                if (financeFilter === 'all') return true;
-                if (financeFilter === 'expenses') return m.type === 'expense';
-                if (financeFilter === 'expenses_work') return m.type === 'expense' && (m.category === 'laboral' || !m.category);
-                if (financeFilter === 'expenses_personal') return m.type === 'expense' && m.category === 'personal';
-                const method = m.paymentMethod || m.method || 'cash';
-                if (financeFilter === 'cash') return method === 'cash' || method === 'mixed';
-                if (financeFilter === 'transfer') return method === 'transfer' || method === 'mixed';
-                if (financeFilter === 'mixed') return method === 'mixed';
-                return true;
+                const desc = (m.desc || '').toLowerCase(); // Protegemos contra errores si no hay texto
+                const isSaving = m.category === 'ahorro' || desc.includes('ahorro');
+
+                // Filtro 1: Tipo/Categoría
+                let matchesType = true;
+
+                if (financeFilter === 'expenses') {
+                    // Muestra gastos PERO EXCLUYE los ahorros
+                    matchesType = m.type === 'expense' && !isSaving;
+                }
+                else if (financeFilter === 'savings') {
+                    // Muestra SOLO ahorros
+                    matchesType = isSaving; 
+                }
+                else if (financeFilter === 'expenses_work') matchesType = m.type === 'expense' && (m.category === 'laboral' || !m.category) && !isSaving;
+                else if (financeFilter === 'expenses_personal') matchesType = m.type === 'expense' && m.category === 'personal' && !isSaving;
+                else if (financeFilter === 'cash') matchesType = (m.paymentMethod || m.method || 'cash') === 'cash' || (m.paymentMethod === 'mixed');
+                else if (financeFilter === 'transfer') matchesType = (m.paymentMethod || m.method || 'cash') === 'transfer' || (m.paymentMethod === 'mixed');
+                else if (financeFilter === 'mixed') matchesType = (m.paymentMethod || m.method) === 'mixed';
+
+                // Filtro 2: Búsqueda por Texto
+                const matchesText = financeSearch === '' || desc.includes(financeSearch.toLowerCase());
+
+                // Filtro 3: Fecha Específica
+                const matchesDate = financeDateSearch === '' || m.date.startsWith(financeDateSearch);
+
+                return matchesType && matchesText && matchesDate;
             });
 
             // 2. Resumen del mes actual (Solo lo que ocurre en este periodo)
@@ -1892,10 +2091,19 @@ const handleDoneConfirm = async () => {
                                 </div>
 
                                 <div className="flex gap-2 w-full mt-1">
+                                    {/* NUEVO BOTÓN REPORTE DIARIO */}
+                                    <button onClick={() => setIsDailyReportOpen(true)} 
+                                        className="flex-[2] bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 border border-indigo-600 shadow-lg shadow-indigo-900/20 transition-all active:scale-95">
+                                        <ClipboardList size={18} /> REPORTE DIARIO
+                                    </button>
+
+                                    {/* BOTÓN AHORROS (EXISTENTE) */}
                                     <button onClick={() => setIsSavingsModalOpen(true)} 
                                         className="flex-[2] bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 border border-amber-600 shadow-lg shadow-amber-900/20 transition-all active:scale-95">
                                         <PiggyBank size={18} /> AHORROS
                                     </button>
+
+                                    {/* BOTÓN SWAP (EXISTENTE) */}
                                     <button onClick={() => setIsBusinessSwapModalOpen(true)} 
                                         className="flex-1 bg-stone-700 hover:bg-stone-600 text-stone-200 py-3 rounded-xl font-bold flex items-center justify-center border border-stone-600 shadow-lg transition-all active:scale-95" title="Mover dinero interno">
                                         <ArrowLeftRight size={18} />
@@ -1904,6 +2112,41 @@ const handleDoneConfirm = async () => {
                             </div>
                         </div>
                     </div>
+					
+					{/* --- NUEVO BLOQUE: BUSCADORES DE FINANZAS --- */}
+                    <div className="flex flex-col md:flex-row gap-4 mt-2 mb-2 animate-in fade-in slide-in-from-top-2">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
+                            <input 
+                                type="text" 
+                                placeholder="Buscar movimiento (ej: cliente, concepto)..." 
+                                className="w-full pl-11 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none text-sm font-medium transition-all" 
+                                value={financeSearch} 
+                                onChange={e => setFinanceSearch(e.target.value)} 
+                            />
+                            {financeSearch && (
+                                <button onClick={() => setFinanceSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-300 hover:text-stone-500">
+                                    <X size={16} />
+                                </button>
+                            )}
+                        </div>
+                        <div className="relative md:w-48">
+                            <input 
+                                type="date" 
+                                className="w-full p-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none text-sm font-medium text-stone-600 transition-all" 
+                                value={financeDateSearch} 
+                                onChange={e => setFinanceDateSearch(e.target.value)} 
+                            />
+                             {/* Botón para limpiar fecha si está seleccionada */}
+                             {financeDateSearch && (
+                                <button onClick={() => setFinanceDateSearch('')} className="absolute right-8 top-1/2 -translate-y-1/2 text-stone-300 hover:text-stone-500">
+                                    <X size={16} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                    {/* --------------------------------------------- */}
+					
 
                     {/* 2. DESGLOSE DE GASTOS */}
                     {(financeFilter === 'all' || financeFilter.includes('expenses')) && (
@@ -1930,12 +2173,20 @@ const handleDoneConfirm = async () => {
                         </div>
                     )}
 
-                    {/* 3. BARRA DE FILTROS */}
+             {/* 3. BARRA DE FILTROS (ACTUALIZADO CON BOTÓN AHORROS) */}
                     <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-stone-200 pb-4 mt-2">
                         <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar w-full md:w-auto">
                              <button onClick={() => setFinanceFilter('all')} className={`px-5 py-2 rounded-full text-xs font-bold transition-all border ${financeFilter === 'all' ? 'bg-stone-900 text-white border-stone-900 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>Todo</button>
+                             
                              <div className="w-px h-6 bg-stone-300 mx-1 self-center opacity-50"></div>
+                             
                              <button onClick={() => setFinanceFilter('expenses')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'expenses' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>Gastos</button>
+                             
+                             {/* NUEVO BOTÓN AHORROS */}
+                             <button onClick={() => setFinanceFilter('savings')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'savings' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><PiggyBank size={14}/> Ahorros</button>
+
+                             <div className="w-px h-6 bg-stone-300 mx-1 self-center opacity-50"></div>
+
                              <button onClick={() => setFinanceFilter('cash')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'cash' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><Banknote size={14}/> Efvo</button>
                              <button onClick={() => setFinanceFilter('transfer')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'transfer' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><CreditCard size={14}/> Dig</button>
                              <button onClick={() => setFinanceFilter('mixed')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'mixed' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><Grid size={14}/> Mixto</button>
@@ -1943,34 +2194,42 @@ const handleDoneConfirm = async () => {
                         <p className="text-[10px] text-stone-400 font-bold uppercase tracking-widest">{filteredMovements.length} REGISTROS</p>
                     </div>
 
-                    {/* 4. LISTA DE MOVIMIENTOS DEL MES */}
+      {/* 4. LISTA DE MOVIMIENTOS DEL MES (CORREGIDO ANTI-CRASH) */}
                     <div className="space-y-3 pb-12">
-                        {filteredMovements.map((m, i) => (
-                            <div key={i} className="bg-white p-4 rounded-2xl border border-stone-100 flex justify-between items-center group hover:shadow-md transition-all hover:border-stone-200">
-                                <div>
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="text-[10px] font-mono text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded">{new Date(m.date).toLocaleDateString()}</span>
-                                        {m.type === 'expense' ? (
-                                            m.category === 'personal' 
-                                            ? <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded"><User size={10}/> Personal</span>
-                                            : <span className="flex items-center gap-1 text-[10px] font-bold text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded"><Briefcase size={10}/> Laboral</span>
-                                        ) : (
-                                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Ingreso</span>
-                                        )}
+                        {filteredMovements.map((m, i) => {
+                            // CORRECCIÓN: Usamos (m.desc || '') para evitar error si no hay texto
+                            const textToSearch = m.desc || ''; 
+                            const isSaving = m.category === 'ahorro' || textToSearch.toLowerCase().includes('ahorro');
+                            
+                            return (
+                                <div key={i} className={`bg-white p-4 rounded-2xl border flex justify-between items-center group hover:shadow-md transition-all ${isSaving ? 'border-amber-100 bg-amber-50/10' : 'border-stone-100 hover:border-stone-200'}`}>
+                                    <div>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="text-[10px] font-mono text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded">{new Date(m.date).toLocaleDateString()}</span>
+                                            {m.type === 'expense' ? (
+                                                isSaving 
+                                                ? <span className="flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded"><PiggyBank size={10}/> Ahorro</span>
+                                                : (m.category === 'personal' 
+                                                    ? <span className="flex items-center gap-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded"><User size={10}/> Personal</span>
+                                                    : <span className="flex items-center gap-1 text-[10px] font-bold text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded"><Briefcase size={10}/> Laboral</span>)
+                                            ) : (
+                                                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Ingreso</span>
+                                            )}
+                                        </div>
+                                        <p className="font-bold text-stone-800 text-sm">{m.desc}</p>
                                     </div>
-                                    <p className="font-bold text-stone-800 text-sm">{m.desc}</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className={`text-lg font-bold ${m.type === 'income' ? 'text-emerald-600' : 'text-red-500'}`}>
-                                        {m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}
-                                    </p>
-                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={() => handleEditFinance(m)} className="text-stone-300 hover:text-stone-600"><Pencil size={14}/></button>
-                                        <button onClick={() => handleDeleteFinance(m)} className="text-stone-300 hover:text-red-500"><Trash2 size={14}/></button>
+                                    <div className="text-right">
+                                        <p className={`text-lg font-bold ${m.type === 'income' ? 'text-emerald-600' : (isSaving ? 'text-amber-600' : 'text-red-500')}`}>
+                                            {m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}
+                                        </p>
+                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => handleEditFinance(m)} className="text-stone-300 hover:text-stone-600"><Pencil size={14}/></button>
+                                            <button onClick={() => handleDeleteFinance(m)} className="text-stone-300 hover:text-red-500"><Trash2 size={14}/></button>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                         {filteredMovements.length === 0 && <div className="py-12 text-center border-2 border-dashed border-stone-100 rounded-2xl"><p className="text-stone-300 font-medium">No hay movimientos este mes</p></div>}
                     </div>
                 </>
@@ -2444,41 +2703,75 @@ const handleDoneConfirm = async () => {
                         )}
                     </Modal>
 
-                    <Modal isOpen={isIncomeModalOpen} onClose={() => setIsIncomeModalOpen(false)} title={editingFinanceId ? "Editar Ingreso" : "Registrar Ingreso"}>
-						<form onSubmit={(e) => { e.preventDefault(); handleSimpleSave('extra_incomes', {...prepareFinanceData(incomeForm), type:'income'}, setIsIncomeModalOpen, setIncomeForm, {description:'', amount:'', method:'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}, editingFinanceId) }} className="space-y-5">
-							{/* CAMPO DE FECHA AGREGADO */}
-							<div className="space-y-1">
-							<label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha</label>
-							<input 
-							type="date" 
-							className="w-full p-3 bg-stone-50 border rounded-xl" 
-							value={incomeForm.date.split('T')[0]} 
-							onChange={e => setIncomeForm({...incomeForm, date: e.target.value})} 
-							/>
-						</div>
+   <Modal isOpen={isIncomeModalOpen} onClose={() => setIsIncomeModalOpen(false)} title={editingFinanceId ? "Editar Ingreso" : "Registrar Ingreso"}>
+                        <form onSubmit={handleSaveIncome} className="space-y-5">
+                            
+                            {/* --- SWITCH TRAER DE AHORROS --- */}
+                            {!editingFinanceId && (
+                                <div className={`p-4 rounded-xl border transition-all ${incomeForm.isSavingsWithdrawal ? 'bg-amber-50 border-amber-200' : 'bg-stone-50 border-stone-200'}`}>
+                                    <button type="button" onClick={() => setIncomeForm({...incomeForm, isSavingsWithdrawal: !incomeForm.isSavingsWithdrawal})} className="flex items-center gap-3 w-full mb-2">
+                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${incomeForm.isSavingsWithdrawal ? 'bg-amber-500' : 'bg-stone-300'}`}>
+                                            <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${incomeForm.isSavingsWithdrawal ? 'translate-x-4' : 'translate-x-0'}`}></div>
+                                        </div>
+                                        <span className={`text-sm font-bold ${incomeForm.isSavingsWithdrawal ? 'text-amber-700' : 'text-stone-500'}`}>Traer dinero de Mis Ahorros</span>
+                                    </button>
+                                    
+                                    {incomeForm.isSavingsWithdrawal && (
+                                        <div className="animate-in slide-in-from-top-2 pt-2 mt-2 border-t border-amber-200">
+                                            <p className="text-[10px] font-bold text-amber-600 uppercase mb-2">¿De qué alcancía retiras?</p>
+                                            <div className="flex gap-2">
+                                                <button type="button" onClick={() => setIncomeForm({...incomeForm, savingsSource: 'cash'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border flex items-center justify-center gap-2 ${incomeForm.savingsSource === 'cash' ? 'bg-white text-emerald-600 border-emerald-200 shadow-sm' : 'bg-amber-100/50 text-amber-800/50 border-transparent'}`}>
+                                                    <Banknote size={14}/> Efectivo
+                                                </button>
+                                                <button type="button" onClick={() => setIncomeForm({...incomeForm, savingsSource: 'transfer'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border flex items-center justify-center gap-2 ${incomeForm.savingsSource === 'transfer' ? 'bg-white text-blue-600 border-blue-200 shadow-sm' : 'bg-amber-100/50 text-amber-800/50 border-transparent'}`}>
+                                                    <CreditCard size={14}/> Digital
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
-						<div className="space-y-1"><label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Concepto</label><input type="text" autoFocus className="w-full p-3 bg-stone-50 border rounded-xl" value={incomeForm.description} onChange={e => setIncomeForm({...incomeForm, description: e.target.value})} /></div>
-						<div className="space-y-1"><label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto Total</label><input type="number" className="w-full p-3 bg-stone-50 border rounded-xl font-mono" value={incomeForm.amount} onChange={e => setIncomeForm({...incomeForm, amount: e.target.value})} /></div>
-        
-						<div className="space-y-2">
-						<label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Método</label>
-							<div className="grid grid-cols-3 gap-3">
-							<button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'cash'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'cash' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Efectivo</button>
-							<button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'transfer'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'transfer' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Digital</button>
-							<button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'mixed'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'mixed' ? 'bg-amber-600 text-white' : 'bg-white text-stone-500'}`}>Mixto</button>
-							</div>
-							</div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha</label>
+                                <input type="date" className="w-full p-3 bg-stone-50 border rounded-xl" value={incomeForm.date.split('T')[0]} onChange={e => setIncomeForm({...incomeForm, date: e.target.value})} />
+                            </div>
 
-							{incomeForm.method === 'mixed' && (
-							<div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
-								<div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Efectivo</label><input type="number" className="w-full p-3 bg-stone-50 border border-amber-200 rounded-xl font-bold" value={incomeForm.mixedCash} onChange={e => setIncomeForm({...incomeForm, mixedCash: e.target.value})} /></div>
-							<div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Digital</label><input type="number" className="w-full p-3 bg-stone-50 border border-blue-200 rounded-xl font-bold" value={incomeForm.mixedTransfer} onChange={e => setIncomeForm({...incomeForm, mixedTransfer: e.target.value})} /></div>
-							</div>
-								)}
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Concepto</label>
+                                <input type="text" autoFocus className="w-full p-3 bg-stone-50 border rounded-xl" placeholder={incomeForm.isSavingsWithdrawal ? "Ej: Inyección de capital" : "Ej: Venta extra..."} value={incomeForm.description} onChange={e => setIncomeForm({...incomeForm, description: e.target.value})} />
+                            </div>
+                            
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto Total</label>
+                                <input type="number" className="w-full p-3 bg-stone-50 border rounded-xl font-mono" value={incomeForm.amount} onChange={e => setIncomeForm({...incomeForm, amount: e.target.value})} />
+                            </div>
 
-						<button type="submit" disabled={isSaving} className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold">{editingFinanceId ? 'Guardar Cambios' : 'Registrar'}</button>
-						</form>
-					</Modal>
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest flex items-center gap-2">
+                                    {incomeForm.isSavingsWithdrawal ? <ArrowDownCircle size={14}/> : ''} 
+                                    {incomeForm.isSavingsWithdrawal ? '¿Dónde ingresa el dinero?' : 'Método de Cobro'}
+                                </label>
+                                <div className="grid grid-cols-3 gap-3">
+                                    <button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'cash'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'cash' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Efectivo</button>
+                                    <button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'transfer'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'transfer' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Digital</button>
+                                    <button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'mixed'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'mixed' ? 'bg-amber-600 text-white' : 'bg-white text-stone-500'}`}>Mixto</button>
+                                </div>
+                            </div>
+
+                            {incomeForm.method === 'mixed' && (
+                                <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
+                                    <div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Efectivo</label><input type="number" className="w-full p-3 bg-stone-50 border border-amber-200 rounded-xl font-bold" value={incomeForm.mixedCash} onChange={e => setIncomeForm({...incomeForm, mixedCash: e.target.value})} /></div>
+                                    <div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Digital</label><input type="number" className="w-full p-3 bg-stone-50 border border-blue-200 rounded-xl font-bold" value={incomeForm.mixedTransfer} onChange={e => setIncomeForm({...incomeForm, mixedTransfer: e.target.value})} /></div>
+                                </div>
+                            )}
+
+                            <button type="submit" disabled={isSaving} className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2">
+                                {incomeForm.isSavingsWithdrawal && <PiggyBank size={18} className="text-emerald-200"/>}
+                                {editingFinanceId ? 'Guardar Cambios' : (incomeForm.isSavingsWithdrawal ? 'Confirmar Retiro e Ingreso' : 'Registrar Ingreso')}
+                            </button>
+                        </form>
+                    </Modal>
 
                 <Modal isOpen={isExpenseModalOpen} onClose={() => setIsExpenseModalOpen(false)} title={editingFinanceId ? "Editar Gasto" : "Registrar Gasto"}>
     <form onSubmit={(e) => { e.preventDefault(); handleSimpleSave('expenses', {...prepareFinanceData(expenseForm), type:'expense'}, setIsExpenseModalOpen, setExpenseForm, {description:'', amount:'', method:'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString(), category: 'laboral'}, editingFinanceId) }} className="space-y-5">
@@ -2643,6 +2936,7 @@ const handleDoneConfirm = async () => {
 				{/* --- MODALES NUEVOS (AHORROS Y MOVIMIENTOS) --- */}
 
                     {/* 1. MODAL VER ALCANCÍA (Saldo) */}
+            {/* 1. MODAL VER ALCANCÍA (Saldo, Ingresar y Retirar) */}
                     <Modal isOpen={isSavingsModalOpen} onClose={() => setIsSavingsModalOpen(false)} title="Mi Alcancía" maxWidth="max-w-2xl">
                         <div className="space-y-6">
                             {/* Cabecera Total */}
@@ -2669,35 +2963,110 @@ const handleDoneConfirm = async () => {
                             </div>
 
                             {/* Acciones */}
-                            <div className="pt-4 border-t border-stone-100">
-                                <button onClick={() => { setIsSavingsModalOpen(false); setIsSavingsDepositModalOpen(true); }} className="w-full py-4 bg-stone-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-stone-800 shadow-lg transition-all">
-                                    <PiggyBank size={20} className="text-amber-400"/>
-                                    <span>Ingresar Dinero a la Cuenta</span>
+                            <div className="flex gap-3 pt-4 border-t border-stone-100">
+                                <button onClick={() => { setIsSavingsModalOpen(false); setIsSavingsDepositModalOpen(true); }} className="flex-1 py-4 bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-500 shadow-lg transition-all">
+                                    <ArrowDownLeft size={20}/>
+                                    <span>Ingresar</span>
+                                </button>
+                                <button onClick={() => { setIsSavingsModalOpen(false); setIsSavingsWithdrawalModalOpen(true); }} className="flex-1 py-4 bg-white border border-stone-200 text-stone-700 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all">
+                                    <ArrowUpRight size={20}/>
+                                    <span>Retirar / Gastar</span>
                                 </button>
                             </div>
 
                             {/* Historial Reciente de Ahorros */}
                             <div>
-                                <h4 className="font-bold text-sm text-stone-800 mb-3">Últimos Ingresos</h4>
+                                <h4 className="font-bold text-sm text-stone-800 mb-3">Historial de Movimientos</h4>
                                 <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
                                     {savingsLogs.length === 0 ? <p className="text-xs text-stone-400 italic">No hay registros aún.</p> : 
-                                    savingsLogs.slice(0, 10).map((log, i) => (
-                                        <div key={i} className="flex justify-between items-center text-xs p-3 bg-stone-50 rounded-lg border border-stone-100">
+                                    savingsLogs.slice(0, 20).map((log, i) => (
+                                        <div key={i} className="flex justify-between items-center text-xs p-3 bg-stone-50 rounded-lg border border-stone-100 group">
                                             <div className="flex items-center gap-2">
-                                                <div className="p-1.5 bg-emerald-100 text-emerald-600 rounded-md"><ArrowDownLeft size={14}/></div>
+                                                <div className={`p-1.5 rounded-md ${log.type === 'withdrawal' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                                    {log.type === 'withdrawal' ? <ArrowUpRight size={14}/> : <ArrowDownLeft size={14}/>}
+                                                </div>
                                                 <div>
-                                                    <p className="font-bold text-stone-700">Depósito <span className="font-normal text-stone-400"> • {new Date(log.date).toLocaleDateString()}</span></p>
+                                                    <p className="font-bold text-stone-700">
+                                                        {log.type === 'withdrawal' ? 'Retiro' : 'Depósito'} 
+                                                        <span className="font-normal text-stone-400"> • {new Date(log.date).toLocaleDateString()}</span>
+                                                    </p>
                                                     <p className="text-stone-500">
-                                                        {log.source === 'external' ? 'Externo' : 'Del Negocio'} <ArrowRight size={10} className="inline mx-1"/> {log.destination === 'cash' ? 'Efectivo' : 'Digital'}
+                                                        {log.type === 'withdrawal' 
+                                                            ? (log.source === 'cash' ? 'Desde Efectivo' : 'Desde Digital')
+                                                            : (log.destination === 'cash' ? 'Hacia Efectivo' : 'Hacia Digital')
+                                                        }
                                                     </p>
                                                 </div>
                                             </div>
-                                            <span className="font-bold text-stone-900">${parseFloat(log.amount).toLocaleString()}</span>
+                                            <div className="flex items-center gap-3">
+                                                <span className={`font-bold ${log.type === 'withdrawal' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                                    {log.type === 'withdrawal' ? '-' : '+'}${parseFloat(log.amount).toLocaleString()}
+                                                </span>
+                                                <button onClick={() => handleDeleteSavingsLog(log.id)} className="text-stone-300 hover:text-red-500 transition-colors p-1 opacity-0 group-hover:opacity-100">
+                                                    <Trash2 size={16}/>
+                                                </button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         </div>
+                    </Modal>
+					
+					{/* NUEVO: MODAL RETIRO AHORRO (GASTO PERSONAL) */}
+                    <Modal isOpen={isSavingsWithdrawalModalOpen} onClose={() => setIsSavingsWithdrawalModalOpen(false)} title="Retirar de Alcancía">
+                        <form onSubmit={handleSaveSavingsWithdrawal} className="space-y-6">
+                            
+                            <div className="bg-red-50 border border-red-100 p-4 rounded-xl flex gap-3">
+                                <div className="bg-white p-2 rounded-full text-red-500 h-fit shadow-sm"><User size={20}/></div>
+                                <div>
+                                    <p className="text-sm font-bold text-red-800">Uso Personal</p>
+                                    <p className="text-xs text-red-600 mt-1">Si eliges "Gasto Personal", se creará automáticamente un registro en tus gastos y restará de tus ahorros.</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto a Retirar</label>
+                                <input type="number" autoFocus className="w-full p-4 bg-stone-50 border rounded-xl font-mono text-2xl font-bold text-center text-red-600" value={savingsWithdrawalForm.amount} onChange={e => setSavingsWithdrawalForm({...savingsWithdrawalForm, amount: e.target.value})} placeholder="$0" />
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">¿De qué alcancía sale?</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button type="button" onClick={() => setSavingsWithdrawalForm({...savingsWithdrawalForm, source: 'cash'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsWithdrawalForm.source === 'cash' ? 'bg-stone-800 text-white shadow-lg' : 'bg-white border-stone-200 text-stone-400'}`}>
+                                        <Banknote size={24}/>
+                                        <span className="font-bold text-sm">Efectivo</span>
+                                    </button>
+                                    <button type="button" onClick={() => setSavingsWithdrawalForm({...savingsWithdrawalForm, source: 'transfer'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsWithdrawalForm.source === 'transfer' ? 'bg-stone-800 text-white shadow-lg' : 'bg-white border-stone-200 text-stone-400'}`}>
+                                        <CreditCard size={24}/>
+                                        <span className="font-bold text-sm">Digital</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Motivo / Destino</label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <button type="button" onClick={() => setSavingsWithdrawalForm({...savingsWithdrawalForm, destination: 'personal'})} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${savingsWithdrawalForm.destination === 'personal' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-white border-stone-200 text-stone-400'}`}>
+                                        <span className="font-bold text-sm flex items-center gap-2"><User size={16}/> Gasto Personal</span>
+                                        {savingsWithdrawalForm.destination === 'personal' && <Check size={16}/>}
+                                    </button>
+                                    <button type="button" onClick={() => setSavingsWithdrawalForm({...savingsWithdrawalForm, destination: 'business'})} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${savingsWithdrawalForm.destination === 'business' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-stone-200 text-stone-400'}`}>
+                                        <span className="font-bold text-sm flex items-center gap-2"><Briefcase size={16}/> Vuelta al Negocio</span>
+                                        {savingsWithdrawalForm.destination === 'business' && <Check size={16}/>}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Detalle (Opcional)</label>
+                                <input type="text" className="w-full p-3 bg-stone-50 border rounded-xl" placeholder="Ej: Cena, Regalo..." value={savingsWithdrawalForm.detail} onChange={e => setSavingsWithdrawalForm({...savingsWithdrawalForm, detail: e.target.value})} />
+                            </div>
+
+                            <button type="submit" disabled={isSaving} className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-red-900/20">
+                                Confirmar Retiro
+                            </button>
+                        </form>
                     </Modal>
 
                     {/* 2. MODAL DEPOSITO AHORRO (Formulario) */}
@@ -2828,6 +3197,61 @@ const handleDoneConfirm = async () => {
                                         </div>
                                     ))}
                                 </div>
+                            </div>
+                        </div>
+                    </Modal>	
+					
+				{/* --- MODAL REPORTE DIARIO --- */}
+                    <Modal isOpen={isDailyReportOpen} onClose={() => setIsDailyReportOpen(false)} title="Control Diario" maxWidth="max-w-md">
+                        <div className="space-y-4">
+                            <p className="text-sm text-stone-500 mb-2">Resumen de movimientos agrupados por día.</p>
+                            <div className="space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar pr-1">
+                                {(() => {
+                                    // Agrupar movimientos por día
+                                    const dailyGroups = {};
+                                    finances.movements.forEach(m => {
+                                        const day = m.date.split('T')[0]; // YYYY-MM-DD
+                                        if (!dailyGroups[day]) dailyGroups[day] = { income: 0, expense: 0 };
+                                        
+                                        if (m.type === 'income') dailyGroups[day].income += m.amount;
+                                        else dailyGroups[day].expense += m.amount;
+                                    });
+
+                                    // Ordenar de más reciente a más antiguo
+                                    const sortedDays = Object.keys(dailyGroups).sort((a, b) => new Date(b) - new Date(a));
+
+                                    if (sortedDays.length === 0) return <p className="text-center text-stone-400 py-4">No hay movimientos registrados.</p>;
+
+                                    return sortedDays.map(day => {
+                                        const data = dailyGroups[day];
+                                        const balance = data.income - data.expense;
+                                        // Truco para evitar problemas de zona horaria
+                                        const dateObj = new Date(day + 'T12:00:00'); 
+                                        
+                                        return (
+                                            <div key={day} className="bg-stone-50 border border-stone-100 rounded-xl p-4">
+                                                <div className="flex justify-between items-center mb-3 border-b border-stone-200 pb-2">
+                                                    <h4 className="font-bold text-stone-800 capitalize">
+                                                        {dateObj.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'short' })}
+                                                    </h4>
+                                                    <span className={`text-xs font-bold px-2 py-1 rounded-md ${balance >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                                        {balance >= 0 ? '+' : ''}${balance.toLocaleString()}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between gap-4">
+                                                    <div className="flex-1 text-center bg-white p-2 rounded-lg border border-stone-100">
+                                                        <p className="text-[10px] text-stone-400 uppercase font-bold">Ingresos</p>
+                                                        <p className="text-emerald-600 font-bold">+${data.income.toLocaleString()}</p>
+                                                    </div>
+                                                    <div className="flex-1 text-center bg-white p-2 rounded-lg border border-stone-100">
+                                                        <p className="text-[10px] text-stone-400 uppercase font-bold">Egresos</p>
+                                                        <p className="text-red-500 font-bold">-${data.expense.toLocaleString()}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    });
+                                })()}
                             </div>
                         </div>
                     </Modal>	
