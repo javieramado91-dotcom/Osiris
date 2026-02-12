@@ -390,7 +390,7 @@
                         </div>
                     </div>
                 </div>
-         ); 
+           );  // <--- AGREGAR ESTO (Paréntesis y punto y coma)
         };
 		
         const Toast = ({ message, type, onClose }) => {
@@ -489,16 +489,7 @@
             const [editingFinanceId, setEditingFinanceId] = useState(null);
             
             const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
-           const [incomeForm, setIncomeForm] = useState({ 
-    description: '', 
-    amount: '', 
-    method: 'cash', 
-    mixedCash: '', 
-    mixedTransfer: '', 
-    date: new Date().toISOString(),
-    isSavingsWithdrawal: false, // <--- Esto es lo que falta
-    savingsSource: 'cash'       // <--- Esto es lo que falta
-});
+            const [incomeForm, setIncomeForm] = useState({ description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString() });
 
             // DEBT STATES - ACTUALIZADO
             const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
@@ -551,16 +542,6 @@
                 destination: 'cash', // A donde va en Ahorros: 'cash' o 'transfer'
                 source: 'external',  // De donde viene: 'external' o 'business'
                 businessAccount: 'cash', // Si viene del negocio: ¿De 'cash' o 'transfer'?
-                date: new Date().toISOString()
-            });
-			
-			// Estado para el Modal de Retiro de Ahorros
-            const [isSavingsWithdrawalModalOpen, setIsSavingsWithdrawalModalOpen] = useState(false);
-            const [savingsWithdrawalForm, setSavingsWithdrawalForm] = useState({
-                amount: '',
-                source: 'cash', // ¿De qué alcancía sale? (cash/transfer)
-                destination: 'personal', // ¿Para qué es? (personal/business)
-                detail: '',
                 date: new Date().toISOString()
             });
 
@@ -774,28 +755,27 @@
             }, [clients, orders]);
 
 
-           // 1. CALCULO SALDO ALCANCÍA (ACTUALIZADO)
+      // 1. CALCULO SALDO ALCANCÍA (AHORA RESTA RETIROS)
             const savingsBalance = useMemo(() => {
                 let cash = 0;
                 let digital = 0;
                 savingsLogs.forEach(log => {
                     const amt = parseFloat(log.amount) || 0;
-                    
-                    // CASO 1: SUMAR DEPOSITOS
                     if (log.type === 'deposit') {
+                        // Si ingresa plata
                         if (log.destination === 'cash') cash += amt;
                         if (log.destination === 'transfer') digital += amt;
-                    } 
-                    // CASO 2: RESTAR RETIROS (LO NUEVO)
-                    else if (log.type === 'withdrawal') {
-                        if (log.source === 'cash') cash -= amt;      // Si salió de la caja de ahorros
-                        if (log.source === 'transfer') digital -= amt;  // Si salió del banco de ahorros
+                    } else if (log.type === 'withdrawal') {
+                        // Si sale plata (Retiro)
+                        // 'source' nos dice de qué bolsillo de la alcancía salió
+                        if (log.source === 'cash') cash -= amt;
+                        if (log.source === 'transfer') digital -= amt;
                     }
                 });
                 return { cash, digital, total: cash + digital };
             }, [savingsLogs]);
 
-           // 2. FINANZAS DEL NEGOCIO (SALDO HISTÓRICO ACUMULADO)
+  // 2. FINANZAS DEL NEGOCIO (VERSIÓN FINAL: IDA Y VUELTA)
             const finances = useMemo(() => {
                 const isCurrentMonth = (dateStr) => {
                     const d = new Date(dateStr);
@@ -811,7 +791,7 @@
                     paymentDetails: item.paymentDetails || null
                 });
 
-                // --- RECOLECCIÓN DE TODOS LOS MOVIMIENTOS ---
+                // --- A. MOVIMIENTOS OPERATIVOS ---
                 const orderMovements = [];
                 orders.forEach(o => {
                     if (o.paymentHistory && o.paymentHistory.length > 0) {
@@ -830,8 +810,26 @@
 
                 const allExpenses = expenses.map(e => mapFinanceItem(e, 'expense', 'expenses'));
                 const allIncomes = incomes.map(i => mapFinanceItem(i, 'income', 'extra_incomes'));
+                
+                // --- B. MOVIMIENTOS DE CAPITAL (IDA Y VUELTA) ---
+                
+                // 1. SALIDAS (Negocio -> Ahorros)
+                const capitalWithdrawals = savingsLogs
+                    .filter(s => s.type === 'deposit' && s.source === 'business') 
+                    .map(s => ({
+                        id: s.id, desc: `Reserva en Alcancía`, amount: parseFloat(s.amount), date: s.date,
+                        type: 'capital_out', isSavings: true, source: 'savings_logs', paymentMethod: s.businessAccount || 'cash'
+                    }));
 
-                // --- LÓGICA DE SUMA POR MÉTODO (PARA SALDO HISTÓRICO) ---
+                // 2. ENTRADAS (Ahorros -> Negocio) ¡ESTO ES LO QUE LE FALTA AL TUYO!
+                const capitalInjections = savingsLogs
+                    .filter(s => s.type === 'withdrawal' && s.destination === 'business')
+                    .map(s => ({
+                        id: s.id, desc: `Recupero desde Alcancía`, amount: parseFloat(s.amount), date: s.date,
+                        type: 'capital_in', isSavings: true, source: 'savings_logs', paymentMethod: s.businessAccount || 'cash'
+                    }));
+
+                // --- HELPER SUMA ---
                 const sumByMethod = (items, targetMethod) => items.reduce((sum, item) => {
                     if (item.paymentMethod === 'mixed' && item.paymentDetails) {
                         return sum + (parseFloat(item.paymentDetails[targetMethod]) || 0);
@@ -842,40 +840,46 @@
                     return sum;
                 }, 0);
 
-                // --- CÁLCULO DE SALDOS TOTALES (ACUMULADO HISTÓRICO) ---
-                // Aquí sumamos todos los movimientos de la historia para que el saldo se conserve mes a mes
-                const rawCash = (sumByMethod(orderMovements, 'cash') + sumByMethod(allIncomes, 'cash')) - sumByMethod(allExpenses, 'cash');
-                const rawTransfer = (sumByMethod(orderMovements, 'transfer') + sumByMethod(allIncomes, 'transfer')) - sumByMethod(allExpenses, 'transfer');
+                // --- C. CÁLCULO DE CAJA (SUMAMOS Y RESTAMOS CAPITAL) ---
+                // Fórmula: Operativo - Gastos - SalidasAhorro + EntradasAhorro
+                const rawCash = (sumByMethod(orderMovements, 'cash') + sumByMethod(allIncomes, 'cash')) 
+                                - sumByMethod(allExpenses, 'cash') 
+                                - sumByMethod(capitalWithdrawals, 'cash') 
+                                + sumByMethod(capitalInjections, 'cash'); // <--- SUMA A LA CAJA
+                                
+                const rawTransfer = (sumByMethod(orderMovements, 'transfer') + sumByMethod(allIncomes, 'transfer')) 
+                                    - sumByMethod(allExpenses, 'transfer')
+                                    - sumByMethod(capitalWithdrawals, 'transfer')
+                                    + sumByMethod(capitalInjections, 'transfer'); // <--- SUMA AL DIGITAL
 
-                // Aplicamos Swaps históricos
+                // Swaps
                 let totalSwapToCash = 0;
                 let totalSwapToTransfer = 0;
                 businessSwaps.forEach(s => {
                     const amt = parseFloat(s.amount) || 0;
-                    if (s.to === 'cash') {
-                        totalSwapToCash += amt;
-                        totalSwapToTransfer -= amt;
-                    } else {
-                        totalSwapToTransfer += amt;
-                        totalSwapToCash -= amt;
-                    }
+                    if (s.to === 'cash') { totalSwapToCash += amt; totalSwapToTransfer -= amt; } 
+                    else { totalSwapToTransfer += amt; totalSwapToCash -= amt; }
                 });
 
                 const totalCash = rawCash + totalSwapToCash;
                 const totalTransfer = rawTransfer + totalSwapToTransfer;
 
-                // --- FILTRADO SOLO PARA LA VISTA DEL MES SELECCIONADO ---
+                // --- FILTRADO MES ---
                 const monthMovements = orderMovements.filter(m => isCurrentMonth(m.date));
                 const monthExpenses = allExpenses.filter(e => isCurrentMonth(e.date));
                 const monthIncomes = allIncomes.filter(i => isCurrentMonth(i.date));
+                const monthSavingsOut = capitalWithdrawals.filter(s => isCurrentMonth(s.date));
+                const monthSavingsIn = capitalInjections.filter(s => isCurrentMonth(s.date));
 
+                // --- RESULTADO (IGNORAMOS AHORRO PARA GANANCIA) ---
                 const incomeVal = monthMovements.reduce((acc, m) => acc + m.amount, 0) + monthIncomes.reduce((acc, i) => acc + i.amount, 0);
-                const expenseVal = monthExpenses.reduce((acc, e) => acc + e.amount, 0);
-                const movements = [...monthMovements, ...monthIncomes, ...monthExpenses].sort((a, b) => new Date(b.date) - new Date(a.date));
+                const expenseVal = monthExpenses.reduce((acc, e) => acc + e.amount, 0); 
+
+                const movements = [...monthMovements, ...monthIncomes, ...monthExpenses, ...monthSavingsOut, ...monthSavingsIn]
+                                  .sort((a, b) => new Date(b.date) - new Date(a.date));
 
                 return { incomeVal, expenseVal, net: incomeVal - expenseVal, totalCash, totalTransfer, totalBalance: totalCash + totalTransfer, movements };
-            }, [orders, expenses, incomes, currentDate, businessSwaps]);
-
+            }, [orders, expenses, incomes, currentDate, businessSwaps, savingsLogs]);
             const stats = useMemo(() => {
                 const currentYear = currentDate.getFullYear();
                 const yearPayments = [];
@@ -1396,7 +1400,7 @@ const handleDoneConfirm = async () => {
 			
 			// --- NUEVAS FUNCIONES DE GUARDADO ---
 
-        // 1. GUARDAR DEPOSITO EN AHORRO (ACTUALIZADO)
+// 1. GUARDAR DEPOSITO O RETIRO EN AHORRO (LÓGICA FINAL)
             const handleSaveSavingsDeposit = async (e) => {
                 e.preventDefault();
                 setIsSaving(true);
@@ -1405,45 +1409,39 @@ const handleDoneConfirm = async () => {
                     if (!amount || amount <= 0) throw new Error("Monto inválido");
 
                     const batch = writeBatch(db);
+                    
+                    // LÓGICA DE DETECCIÓN:
+                    // Si el origen (source) es una caja de ahorro ('cash' o 'transfer'), significa que sale de la alcancía -> ES RETIRO.
+                    // Si el origen es 'business' o 'external', significa que entra a la alcancía -> ES DEPÓSITO.
+                    const isWithdrawal = savingsForm.source === 'cash' || savingsForm.source === 'transfer';
+                    const type = isWithdrawal ? 'withdrawal' : 'deposit';
 
-                    // A. Log en Ahorros (Siempre se guarda)
                     const savingRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_logs'));
                     batch.set(savingRef, {
-                        type: 'deposit',
+                        type: type,
                         amount: amount,
-                        destination: savingsForm.destination, // cash o transfer (ahorros)
-                        source: savingsForm.source, // external o business
+                        destination: savingsForm.destination,
+                        source: savingsForm.source,
+                        // Si la operación involucra al negocio (ya sea entrando o saliendo), guardamos en qué cuenta impacta
+                        businessAccount: (savingsForm.source === 'business' || savingsForm.destination === 'business') ? savingsForm.businessAccount : null,
                         date: savingsForm.date,
                         createdAt: new Date().toISOString()
                     });
 
-                    // B. Si sale del negocio -> Crear Gasto Automático con categoría 'ahorro'
-                    if (savingsForm.source === 'business') {
-                        const expenseRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'));
-                        batch.set(expenseRef, {
-                            description: `Ahorro (${savingsForm.destination === 'cash' ? 'Efectivo' : 'Digital'})`, 
-                            amount: amount,
-                            date: savingsForm.date,
-                            method: savingsForm.businessAccount,
-                            category: 'ahorro', // <--- ESTO ES LA CLAVE PARA EL COLOR
-                            createdAt: new Date().toISOString()
-                        });
-                    }
-
                     await batch.commit();
-                    addToast('Ahorro registrado correctamente');
+                    addToast(isWithdrawal ? 'Dinero recuperado correctamente' : 'Dinero guardado en alcancía');
                     setIsSavingsDepositModalOpen(false);
-                    // Reiniciar formulario
+                    
+                    // Reiniciamos el formulario a un estado neutro
                     setSavingsForm({ amount: '', destination: 'cash', source: 'external', businessAccount: 'cash', date: new Date().toISOString() });
 
                 } catch (error) {
                     console.error(error);
-                    addToast('Error al guardar ahorro', 'error');
+                    addToast('Error al procesar la operación', 'error');
                 } finally {
                     setIsSaving(false);
                 }
             };
-
             // 2. GUARDAR MOVIMIENTO INTERNO NEGOCIO (SWAP)
             const handleSaveBusinessSwap = async (e) => {
                 e.preventDefault();
@@ -1469,155 +1467,7 @@ const handleDoneConfirm = async () => {
                     setIsSaving(false);
                 }
             };
-			
-			// 3. GUARDAR INGRESO (Código faltante que soluciona el error)
-            const handleSaveIncome = async (e) => {
-                e.preventDefault();
-                setIsSaving(true);
-                try {
-                    const batch = writeBatch(db);
-                    
-                    let incomeRef;
-                    if (editingFinanceId) {
-                        incomeRef = doc(db, 'artifacts', appId, 'public', 'data', 'extra_incomes', editingFinanceId);
-                    } else {
-                        incomeRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'extra_incomes'));
-                    }
 
-                    const incomeData = {
-                        description: incomeForm.description,
-                        amount: parseFloat(incomeForm.amount),
-                        date: incomeForm.date,
-                        method: incomeForm.method, 
-                        paymentMethod: incomeForm.method,
-                        type: 'income',
-                        category: 'laboral', 
-                        isSavingsWithdrawal: incomeForm.isSavingsWithdrawal || false,
-                        createdAt: new Date().toISOString()
-                    };
-
-                    if (incomeForm.method === 'mixed') {
-                        incomeData.paymentDetails = {
-                            cash: parseFloat(incomeForm.mixedCash) || 0,
-                            transfer: parseFloat(incomeForm.mixedTransfer) || 0
-                        };
-                    }
-
-                    if (!incomeForm.isSavingsWithdrawal) {
-                        if (editingFinanceId) {
-                            await updateDoc(incomeRef, incomeData);
-                        } else {
-                            await setDoc(incomeRef, incomeData);
-                        }
-                    } else {
-                        batch.set(incomeRef, incomeData);
-                        const logRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_logs'));
-                        batch.set(logRef, {
-                            type: 'withdrawal',
-                            amount: parseFloat(incomeForm.amount),
-                            source: incomeForm.savingsSource, 
-                            destination: 'business', 
-                            date: incomeForm.date,
-                            createdAt: new Date().toISOString()
-                        });
-                        await batch.commit();
-                    }
-
-                    addToast(editingFinanceId ? 'Ingreso actualizado' : 'Ingreso registrado');
-                    setIsIncomeModalOpen(false);
-                    setIncomeForm({ description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString(), isSavingsWithdrawal: false, savingsSource: 'cash' });
-                    setEditingFinanceId(null);
-
-                } catch (error) {
-                    console.error(error);
-                    addToast('Error al guardar ingreso', 'error');
-                } finally {
-                    setIsSaving(false);
-                }
-            };
-			
-			// 4. ELIMINAR REGISTRO DE AHORRO
-            const handleDeleteSavingsLog = async (id) => {
-                setConfirmModal({
-                    isOpen: true, 
-                    title: 'Eliminar Registro', 
-                    message: '¿Borrar este movimiento de la alcancía? El saldo se recalculará.', 
-                    isDanger: true, 
-                    confirmText: 'Eliminar',
-                    onConfirm: async () => {
-                        try { 
-                            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_logs', id)); 
-                            addToast('Movimiento eliminado'); 
-                        } catch(e) { 
-                            addToast('Error al eliminar', 'error'); 
-                        }
-                    }
-                });
-            };
-
-            // 5. GUARDAR RETIRO DE AHORRO (GASTO PERSONAL)
-            const handleSaveSavingsWithdrawal = async (e) => {
-                e.preventDefault();
-                setIsSaving(true);
-                try {
-                    const amount = parseFloat(savingsWithdrawalForm.amount);
-                    if (!amount || amount <= 0) throw new Error("Monto inválido");
-
-                    const batch = writeBatch(db);
-
-                    // A. Registrar la SALIDA en el log de ahorros
-                    const logRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_logs'));
-                    batch.set(logRef, {
-                        type: 'withdrawal', // Importante para que reste
-                        amount: amount,
-                        source: savingsWithdrawalForm.source, // 'cash' o 'transfer' (LA CUENTA DE ORIGEN)
-                        destination: savingsWithdrawalForm.destination, // 'personal' o 'business'
-                        detail: savingsWithdrawalForm.detail || 'Retiro',
-                        date: savingsWithdrawalForm.date,
-                        createdAt: new Date().toISOString()
-                    });
-
-                    // B. Si es Gasto Personal -> Crear Gasto en Finanzas automáticamente
-                    if (savingsWithdrawalForm.destination === 'personal') {
-                        const expenseRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'));
-                        batch.set(expenseRef, {
-                            description: `(Desde Ahorros) ${savingsWithdrawalForm.detail || 'Gasto Personal'}`,
-                            amount: amount,
-                            date: savingsWithdrawalForm.date,
-                            method: savingsWithdrawalForm.source, // Mantiene coherencia de método
-                            category: 'personal', // <--- CLAVE: Se marca como personal
-                            createdAt: new Date().toISOString()
-                        });
-                    }
-                    
-                    // C. Si es vuelta al Negocio (Inyección) -> Crear Ingreso Extra
-                    if (savingsWithdrawalForm.destination === 'business') {
-                         const incomeRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'extra_incomes'));
-                         batch.set(incomeRef, {
-                            description: `Inyección desde Ahorros`,
-                            amount: amount,
-                            date: savingsWithdrawalForm.date,
-                            method: savingsWithdrawalForm.source,
-                            type: 'income',
-                            category: 'laboral',
-                            isSavingsWithdrawal: true, // Marca especial
-                            createdAt: new Date().toISOString()
-                        });
-                    }
-
-                    await batch.commit();
-                    addToast('Retiro registrado correctamente');
-                    setIsSavingsWithdrawalModalOpen(false);
-                    setSavingsWithdrawalForm({ amount: '', source: 'cash', destination: 'personal', detail: '', date: new Date().toISOString() });
-
-                } catch (error) {
-                    console.error(error);
-                    addToast('Error al registrar retiro', 'error');
-                } finally {
-                    setIsSaving(false);
-                }
-            };
-			
             if (!isConfigured) return <ConfigErrorScreen />;
       
 			if (isLocked) return <LoginScreen onLogin={handleLogin} />;
@@ -1684,13 +1534,13 @@ const handleDoneConfirm = async () => {
 
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 md:max-w-7xl md:mx-auto w-full pb-24 md:pb-8">
                             
-                        {/* Header Section */}
+                            {/* Header Section */}
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
                                 <div>
                                     <h2 className="text-2xl md:text-3xl font-bold text-stone-900 brand-font">Vestite para ganar.</h2>
                                     <p className="text-stone-500 mt-1 flex items-center gap-2 text-sm"><Calendar size={14}/> {capitalizedMonth}</p>
                                 </div>
-                                {/* BOTONES DE MES (VISIBLES EN PEDIDOS Y FINANZAS) */}
+                             {/* CONTROLES DE MES (AHORA EN PEDIDOS Y FINANZAS) */}
                                 {(activeTab === 'orders' || activeTab === 'finances') && (
                                 <div className="flex items-center bg-white p-1.5 rounded-xl shadow-sm border border-stone-200">
                                     <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-stone-100 rounded-lg text-stone-400 hover:text-stone-800 transition-colors"><ChevronLeft size={20}/></button>
@@ -1989,33 +1839,25 @@ const handleDoneConfirm = async () => {
         
         {/* LÓGICA DE INTERFAZ ACTUALIZADA - SALDO REAL ACUMULADO */}
         {(() => {
-           // 1. Filtramos los movimientos (ACTUALIZADO CON BÚSQUEDA, FECHA Y FILTRO AHORROS)
+            // 1. Filtramos los movimientos SOLO para la lista visual del mes seleccionado
+         // 1. Filtramos los movimientos (ACTUALIZADO CON BÚSQUEDA Y FECHA)
             const filteredMovements = finances.movements.filter(m => {
-                const desc = (m.desc || '').toLowerCase(); // Protegemos contra errores si no hay texto
-                const isSaving = m.category === 'ahorro' || desc.includes('ahorro');
-
-                // Filtro 1: Tipo/Categoría
+                // Filtro 1: Tipo/Categoría (El que ya tenías)
                 let matchesType = true;
-
-                if (financeFilter === 'expenses') {
-                    // Muestra gastos PERO EXCLUYE los ahorros
-                    matchesType = m.type === 'expense' && !isSaving;
-                }
-                else if (financeFilter === 'savings') {
-                    // Muestra SOLO ahorros
-                    matchesType = isSaving; 
-                }
-                else if (financeFilter === 'expenses_work') matchesType = m.type === 'expense' && (m.category === 'laboral' || !m.category) && !isSaving;
-                else if (financeFilter === 'expenses_personal') matchesType = m.type === 'expense' && m.category === 'personal' && !isSaving;
+                if (financeFilter === 'expenses') matchesType = m.type === 'expense';
+                else if (financeFilter === 'expenses_work') matchesType = m.type === 'expense' && (m.category === 'laboral' || !m.category);
+                else if (financeFilter === 'expenses_personal') matchesType = m.type === 'expense' && m.category === 'personal';
                 else if (financeFilter === 'cash') matchesType = (m.paymentMethod || m.method || 'cash') === 'cash' || (m.paymentMethod === 'mixed');
                 else if (financeFilter === 'transfer') matchesType = (m.paymentMethod || m.method || 'cash') === 'transfer' || (m.paymentMethod === 'mixed');
                 else if (financeFilter === 'mixed') matchesType = (m.paymentMethod || m.method) === 'mixed';
 
-                // Filtro 2: Búsqueda por Texto
-                const matchesText = financeSearch === '' || desc.includes(financeSearch.toLowerCase());
+                // Filtro 2: Búsqueda por Texto (Nombre/Concepto)
+                const matchesText = financeSearch === '' || 
+                                    m.desc.toLowerCase().includes(financeSearch.toLowerCase());
 
                 // Filtro 3: Fecha Específica
-                const matchesDate = financeDateSearch === '' || m.date.startsWith(financeDateSearch);
+                const matchesDate = financeDateSearch === '' || 
+                                    m.date.startsWith(financeDateSearch);
 
                 return matchesType && matchesText && matchesDate;
             });
@@ -2173,17 +2015,20 @@ const handleDoneConfirm = async () => {
                         </div>
                     )}
 
-             {/* 3. BARRA DE FILTROS (ACTUALIZADO CON BOTÓN AHORROS) */}
+                   {/* 3. BARRA DE FILTROS */}
                     <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-stone-200 pb-4 mt-2">
                         <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar w-full md:w-auto">
                              <button onClick={() => setFinanceFilter('all')} className={`px-5 py-2 rounded-full text-xs font-bold transition-all border ${financeFilter === 'all' ? 'bg-stone-900 text-white border-stone-900 shadow-md' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>Todo</button>
                              
                              <div className="w-px h-6 bg-stone-300 mx-1 self-center opacity-50"></div>
                              
-                             <button onClick={() => setFinanceFilter('expenses')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'expenses' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>Gastos</button>
-                             
-                             {/* NUEVO BOTÓN AHORROS */}
-                             <button onClick={() => setFinanceFilter('savings')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'savings' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}><PiggyBank size={14}/> Ahorros</button>
+                             {/* FILTROS DE GASTOS ESPECÍFICOS */}
+                             <button onClick={() => setFinanceFilter('expenses_work')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'expenses_work' ? 'bg-stone-700 text-white border-stone-700 shadow-sm' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
+                                <Briefcase size={14}/> Laboral
+                             </button>
+                             <button onClick={() => setFinanceFilter('expenses_personal')} className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-2 ${financeFilter === 'expenses_personal' ? 'bg-amber-100 text-amber-800 border-amber-200 shadow-sm' : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50'}`}>
+                                <User size={14}/> Personal
+                             </button>
 
                              <div className="w-px h-6 bg-stone-300 mx-1 self-center opacity-50"></div>
 
@@ -2194,42 +2039,49 @@ const handleDoneConfirm = async () => {
                         <p className="text-[10px] text-stone-400 font-bold uppercase tracking-widest">{filteredMovements.length} REGISTROS</p>
                     </div>
 
-      {/* 4. LISTA DE MOVIMIENTOS DEL MES (CORREGIDO ANTI-CRASH) */}
+                    {/* 4. LISTA DE MOVIMIENTOS DEL MES */}
                     <div className="space-y-3 pb-12">
-                        {filteredMovements.map((m, i) => {
-                            // CORRECCIÓN: Usamos (m.desc || '') para evitar error si no hay texto
-                            const textToSearch = m.desc || ''; 
-                            const isSaving = m.category === 'ahorro' || textToSearch.toLowerCase().includes('ahorro');
-                            
-                            return (
-                                <div key={i} className={`bg-white p-4 rounded-2xl border flex justify-between items-center group hover:shadow-md transition-all ${isSaving ? 'border-amber-100 bg-amber-50/10' : 'border-stone-100 hover:border-stone-200'}`}>
-                                    <div>
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="text-[10px] font-mono text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded">{new Date(m.date).toLocaleDateString()}</span>
-                                            {m.type === 'expense' ? (
-                                                isSaving 
-                                                ? <span className="flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded"><PiggyBank size={10}/> Ahorro</span>
-                                                : (m.category === 'personal' 
-                                                    ? <span className="flex items-center gap-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded"><User size={10}/> Personal</span>
-                                                    : <span className="flex items-center gap-1 text-[10px] font-bold text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded"><Briefcase size={10}/> Laboral</span>)
-                                            ) : (
-                                                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Ingreso</span>
-                                            )}
-                                        </div>
-                                        <p className="font-bold text-stone-800 text-sm">{m.desc}</p>
+                        {filteredMovements.map((m, i) => (
+                       <div key={i} className={`p-4 rounded-2xl border flex justify-between items-center group hover:shadow-md transition-all 
+                                ${m.isSavings ? 'bg-amber-50/50 border-amber-100' : 'bg-white border-stone-100 hover:border-stone-200'}`}>
+                                <div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-[10px] font-mono text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded">{new Date(m.date).toLocaleDateString()}</span>
+                                        
+                                        {/* ETIQUETAS DINÁMICAS (AHORA INCLUYE AHORRO) */}
+                                        {m.isSavings ? (
+                                             <span className="flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">
+                                                <PiggyBank size={10}/> AHORRO
+                                             </span>
+                                        ) : m.type === 'expense' ? (
+                                            m.category === 'personal' 
+                                            ? <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100"><User size={10}/> Personal</span>
+                                            : <span className="flex items-center gap-1 text-[10px] font-bold text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200"><Briefcase size={10}/> Laboral</span>
+                                        ) : (
+                                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">Ingreso</span>
+                                        )}
                                     </div>
-                                    <div className="text-right">
-                                        <p className={`text-lg font-bold ${m.type === 'income' ? 'text-emerald-600' : (isSaving ? 'text-amber-600' : 'text-red-500')}`}>
-                                            {m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}
-                                        </p>
-                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <p className="font-bold text-stone-800 text-sm">{m.desc}</p>
+                                </div>
+                                <div className="text-right">
+                                    {/* El monto se muestra en ámbar si es ahorro */}
+                                    <p className={`text-lg font-bold ${m.isSavings ? 'text-amber-600' : (m.type==='income' ? 'text-emerald-600' : 'text-red-500')}`}>
+                                        {m.type==='income' ? '+' : '-'}${m.amount.toLocaleString()}
+                                    </p>
+                                    
+                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {/* Si es Ahorro NO mostramos botón de editar (para evitar conflictos) */}
+                                        {!m.isSavings && (
                                             <button onClick={() => handleEditFinance(m)} className="text-stone-300 hover:text-stone-600"><Pencil size={14}/></button>
-                                            <button onClick={() => handleDeleteFinance(m)} className="text-stone-300 hover:text-red-500"><Trash2 size={14}/></button>
-                                        </div>
+                                        )}
+                                        
+                                        {/* BOTÓN DE BORRAR INTELIGENTE */}
+                                        {/* Si es Ahorro -> Borra del log de ahorros. Si es Gasto -> Borra de gastos. */}
+                                        <button onClick={() => m.isSavings ? handleDelete('savings_logs', m.id) : handleDeleteFinance(m)} className="text-stone-300 hover:text-red-500"><Trash2 size={14}/></button>
                                     </div>
                                 </div>
-                            );
-                        })}
+                            </div>
+                        ))}
                         {filteredMovements.length === 0 && <div className="py-12 text-center border-2 border-dashed border-stone-100 rounded-2xl"><p className="text-stone-300 font-medium">No hay movimientos este mes</p></div>}
                     </div>
                 </>
@@ -2703,75 +2555,41 @@ const handleDoneConfirm = async () => {
                         )}
                     </Modal>
 
-   <Modal isOpen={isIncomeModalOpen} onClose={() => setIsIncomeModalOpen(false)} title={editingFinanceId ? "Editar Ingreso" : "Registrar Ingreso"}>
-                        <form onSubmit={handleSaveIncome} className="space-y-5">
-                            
-                            {/* --- SWITCH TRAER DE AHORROS --- */}
-                            {!editingFinanceId && (
-                                <div className={`p-4 rounded-xl border transition-all ${incomeForm.isSavingsWithdrawal ? 'bg-amber-50 border-amber-200' : 'bg-stone-50 border-stone-200'}`}>
-                                    <button type="button" onClick={() => setIncomeForm({...incomeForm, isSavingsWithdrawal: !incomeForm.isSavingsWithdrawal})} className="flex items-center gap-3 w-full mb-2">
-                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${incomeForm.isSavingsWithdrawal ? 'bg-amber-500' : 'bg-stone-300'}`}>
-                                            <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${incomeForm.isSavingsWithdrawal ? 'translate-x-4' : 'translate-x-0'}`}></div>
-                                        </div>
-                                        <span className={`text-sm font-bold ${incomeForm.isSavingsWithdrawal ? 'text-amber-700' : 'text-stone-500'}`}>Traer dinero de Mis Ahorros</span>
-                                    </button>
-                                    
-                                    {incomeForm.isSavingsWithdrawal && (
-                                        <div className="animate-in slide-in-from-top-2 pt-2 mt-2 border-t border-amber-200">
-                                            <p className="text-[10px] font-bold text-amber-600 uppercase mb-2">¿De qué alcancía retiras?</p>
-                                            <div className="flex gap-2">
-                                                <button type="button" onClick={() => setIncomeForm({...incomeForm, savingsSource: 'cash'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border flex items-center justify-center gap-2 ${incomeForm.savingsSource === 'cash' ? 'bg-white text-emerald-600 border-emerald-200 shadow-sm' : 'bg-amber-100/50 text-amber-800/50 border-transparent'}`}>
-                                                    <Banknote size={14}/> Efectivo
-                                                </button>
-                                                <button type="button" onClick={() => setIncomeForm({...incomeForm, savingsSource: 'transfer'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border flex items-center justify-center gap-2 ${incomeForm.savingsSource === 'transfer' ? 'bg-white text-blue-600 border-blue-200 shadow-sm' : 'bg-amber-100/50 text-amber-800/50 border-transparent'}`}>
-                                                    <CreditCard size={14}/> Digital
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                    <Modal isOpen={isIncomeModalOpen} onClose={() => setIsIncomeModalOpen(false)} title={editingFinanceId ? "Editar Ingreso" : "Registrar Ingreso"}>
+						<form onSubmit={(e) => { e.preventDefault(); handleSimpleSave('extra_incomes', {...prepareFinanceData(incomeForm), type:'income'}, setIsIncomeModalOpen, setIncomeForm, {description:'', amount:'', method:'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}, editingFinanceId) }} className="space-y-5">
+							{/* CAMPO DE FECHA AGREGADO */}
+							<div className="space-y-1">
+							<label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha</label>
+							<input 
+							type="date" 
+							className="w-full p-3 bg-stone-50 border rounded-xl" 
+							value={incomeForm.date.split('T')[0]} 
+							onChange={e => setIncomeForm({...incomeForm, date: e.target.value})} 
+							/>
+						</div>
 
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha</label>
-                                <input type="date" className="w-full p-3 bg-stone-50 border rounded-xl" value={incomeForm.date.split('T')[0]} onChange={e => setIncomeForm({...incomeForm, date: e.target.value})} />
-                            </div>
+						<div className="space-y-1"><label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Concepto</label><input type="text" autoFocus className="w-full p-3 bg-stone-50 border rounded-xl" value={incomeForm.description} onChange={e => setIncomeForm({...incomeForm, description: e.target.value})} /></div>
+						<div className="space-y-1"><label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto Total</label><input type="number" className="w-full p-3 bg-stone-50 border rounded-xl font-mono" value={incomeForm.amount} onChange={e => setIncomeForm({...incomeForm, amount: e.target.value})} /></div>
+        
+						<div className="space-y-2">
+						<label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Método</label>
+							<div className="grid grid-cols-3 gap-3">
+							<button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'cash'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'cash' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Efectivo</button>
+							<button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'transfer'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'transfer' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Digital</button>
+							<button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'mixed'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'mixed' ? 'bg-amber-600 text-white' : 'bg-white text-stone-500'}`}>Mixto</button>
+							</div>
+							</div>
 
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Concepto</label>
-                                <input type="text" autoFocus className="w-full p-3 bg-stone-50 border rounded-xl" placeholder={incomeForm.isSavingsWithdrawal ? "Ej: Inyección de capital" : "Ej: Venta extra..."} value={incomeForm.description} onChange={e => setIncomeForm({...incomeForm, description: e.target.value})} />
-                            </div>
-                            
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto Total</label>
-                                <input type="number" className="w-full p-3 bg-stone-50 border rounded-xl font-mono" value={incomeForm.amount} onChange={e => setIncomeForm({...incomeForm, amount: e.target.value})} />
-                            </div>
+							{incomeForm.method === 'mixed' && (
+							<div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
+								<div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Efectivo</label><input type="number" className="w-full p-3 bg-stone-50 border border-amber-200 rounded-xl font-bold" value={incomeForm.mixedCash} onChange={e => setIncomeForm({...incomeForm, mixedCash: e.target.value})} /></div>
+							<div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Digital</label><input type="number" className="w-full p-3 bg-stone-50 border border-blue-200 rounded-xl font-bold" value={incomeForm.mixedTransfer} onChange={e => setIncomeForm({...incomeForm, mixedTransfer: e.target.value})} /></div>
+							</div>
+								)}
 
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest flex items-center gap-2">
-                                    {incomeForm.isSavingsWithdrawal ? <ArrowDownCircle size={14}/> : ''} 
-                                    {incomeForm.isSavingsWithdrawal ? '¿Dónde ingresa el dinero?' : 'Método de Cobro'}
-                                </label>
-                                <div className="grid grid-cols-3 gap-3">
-                                    <button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'cash'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'cash' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Efectivo</button>
-                                    <button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'transfer'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'transfer' ? 'bg-stone-800 text-white' : 'bg-white text-stone-500'}`}>Digital</button>
-                                    <button type="button" onClick={() => setIncomeForm({...incomeForm, method: 'mixed'})} className={`py-3 rounded-xl border font-bold text-sm ${incomeForm.method === 'mixed' ? 'bg-amber-600 text-white' : 'bg-white text-stone-500'}`}>Mixto</button>
-                                </div>
-                            </div>
-
-                            {incomeForm.method === 'mixed' && (
-                                <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Efectivo</label><input type="number" className="w-full p-3 bg-stone-50 border border-amber-200 rounded-xl font-bold" value={incomeForm.mixedCash} onChange={e => setIncomeForm({...incomeForm, mixedCash: e.target.value})} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-stone-400 uppercase">En Digital</label><input type="number" className="w-full p-3 bg-stone-50 border border-blue-200 rounded-xl font-bold" value={incomeForm.mixedTransfer} onChange={e => setIncomeForm({...incomeForm, mixedTransfer: e.target.value})} /></div>
-                                </div>
-                            )}
-
-                            <button type="submit" disabled={isSaving} className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2">
-                                {incomeForm.isSavingsWithdrawal && <PiggyBank size={18} className="text-emerald-200"/>}
-                                {editingFinanceId ? 'Guardar Cambios' : (incomeForm.isSavingsWithdrawal ? 'Confirmar Retiro e Ingreso' : 'Registrar Ingreso')}
-                            </button>
-                        </form>
-                    </Modal>
+						<button type="submit" disabled={isSaving} className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold">{editingFinanceId ? 'Guardar Cambios' : 'Registrar'}</button>
+						</form>
+					</Modal>
 
                 <Modal isOpen={isExpenseModalOpen} onClose={() => setIsExpenseModalOpen(false)} title={editingFinanceId ? "Editar Gasto" : "Registrar Gasto"}>
     <form onSubmit={(e) => { e.preventDefault(); handleSimpleSave('expenses', {...prepareFinanceData(expenseForm), type:'expense'}, setIsExpenseModalOpen, setExpenseForm, {description:'', amount:'', method:'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString(), category: 'laboral'}, editingFinanceId) }} className="space-y-5">
@@ -2933,146 +2751,115 @@ const handleDoneConfirm = async () => {
                         })()}
                     </Modal>
 					
-				{/* --- MODALES NUEVOS (AHORROS Y MOVIMIENTOS) --- */}
+{/* 1. MODAL VER ALCANCÍA (DASHBOARD FINAL CON RETIRO) */}
+                    <Modal isOpen={isSavingsModalOpen} onClose={() => setIsSavingsModalOpen(false)} title="Mi Alcancía" maxWidth="max-w-4xl">
+                        <div className="flex flex-col md:flex-row md:h-[500px]">
+                            
+                            {/* COLUMNA IZQUIERDA: RESUMEN Y ACCIONES */}
+                            <div className="w-full md:w-5/12 bg-stone-900 p-6 md:p-8 text-white flex flex-col justify-between relative overflow-hidden shrink-0">
+                                <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+                                <div className="absolute bottom-0 left-0 w-40 h-40 bg-stone-700/20 rounded-full blur-2xl -ml-10 -mb-10 pointer-events-none"></div>
 
-                    {/* 1. MODAL VER ALCANCÍA (Saldo) */}
-            {/* 1. MODAL VER ALCANCÍA (Saldo, Ingresar y Retirar) */}
-                    <Modal isOpen={isSavingsModalOpen} onClose={() => setIsSavingsModalOpen(false)} title="Mi Alcancía" maxWidth="max-w-2xl">
-                        <div className="space-y-6">
-                            {/* Cabecera Total */}
-                            <div className="bg-stone-900 text-white p-6 rounded-2xl shadow-xl text-center relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-full h-full opacity-10">
-                                    <div className="absolute -top-10 -left-10 w-40 h-40 bg-amber-500 rounded-full blur-3xl"></div>
-                                </div>
-                                <p className="text-stone-400 text-xs font-bold uppercase tracking-widest mb-1">Total Ahorrado</p>
-                                <h3 className="text-4xl font-bold brand-font text-amber-400">${savingsBalance.total.toLocaleString()}</h3>
-                            </div>
-
-                            {/* Columnas */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl text-center">
-                                    <div className="w-10 h-10 mx-auto bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-2"><Banknote size={20}/></div>
-                                    <p className="text-emerald-800 text-xs font-bold uppercase">Efectivo</p>
-                                    <p className="text-2xl font-bold text-stone-800">${savingsBalance.cash.toLocaleString()}</p>
-                                </div>
-                                <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-center">
-                                    <div className="w-10 h-10 mx-auto bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-2"><CreditCard size={20}/></div>
-                                    <p className="text-blue-800 text-xs font-bold uppercase">Digital</p>
-                                    <p className="text-2xl font-bold text-stone-800">${savingsBalance.digital.toLocaleString()}</p>
-                                </div>
-                            </div>
-
-                            {/* Acciones */}
-                            <div className="flex gap-3 pt-4 border-t border-stone-100">
-                                <button onClick={() => { setIsSavingsModalOpen(false); setIsSavingsDepositModalOpen(true); }} className="flex-1 py-4 bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-500 shadow-lg transition-all">
-                                    <ArrowDownLeft size={20}/>
-                                    <span>Ingresar</span>
-                                </button>
-                                <button onClick={() => { setIsSavingsModalOpen(false); setIsSavingsWithdrawalModalOpen(true); }} className="flex-1 py-4 bg-white border border-stone-200 text-stone-700 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all">
-                                    <ArrowUpRight size={20}/>
-                                    <span>Retirar / Gastar</span>
-                                </button>
-                            </div>
-
-                            {/* Historial Reciente de Ahorros */}
-                            <div>
-                                <h4 className="font-bold text-sm text-stone-800 mb-3">Historial de Movimientos</h4>
-                                <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-                                    {savingsLogs.length === 0 ? <p className="text-xs text-stone-400 italic">No hay registros aún.</p> : 
-                                    savingsLogs.slice(0, 20).map((log, i) => (
-                                        <div key={i} className="flex justify-between items-center text-xs p-3 bg-stone-50 rounded-lg border border-stone-100 group">
-                                            <div className="flex items-center gap-2">
-                                                <div className={`p-1.5 rounded-md ${log.type === 'withdrawal' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                                    {log.type === 'withdrawal' ? <ArrowUpRight size={14}/> : <ArrowDownLeft size={14}/>}
-                                                </div>
-                                                <div>
-                                                    <p className="font-bold text-stone-700">
-                                                        {log.type === 'withdrawal' ? 'Retiro' : 'Depósito'} 
-                                                        <span className="font-normal text-stone-400"> • {new Date(log.date).toLocaleDateString()}</span>
-                                                    </p>
-                                                    <p className="text-stone-500">
-                                                        {log.type === 'withdrawal' 
-                                                            ? (log.source === 'cash' ? 'Desde Efectivo' : 'Desde Digital')
-                                                            : (log.destination === 'cash' ? 'Hacia Efectivo' : 'Hacia Digital')
-                                                        }
-                                                    </p>
-                                                </div>
-                                            </div>
+                                <div className="relative z-10">
+                                    <div className="flex items-center gap-2 mb-1 opacity-60">
+                                        <Crown size={18} className="text-amber-500"/>
+                                        <span className="text-xs font-bold uppercase tracking-[0.3em]">Patrimonio Total</span>
+                                    </div>
+                                    <h3 className="text-5xl font-bold brand-font text-white tracking-tight mt-2 mb-8">${savingsBalance.total.toLocaleString()}</h3>
+                                    
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10 backdrop-blur-sm">
                                             <div className="flex items-center gap-3">
-                                                <span className={`font-bold ${log.type === 'withdrawal' ? 'text-red-600' : 'text-emerald-600'}`}>
-                                                    {log.type === 'withdrawal' ? '-' : '+'}${parseFloat(log.amount).toLocaleString()}
-                                                </span>
-                                                <button onClick={() => handleDeleteSavingsLog(log.id)} className="text-stone-300 hover:text-red-500 transition-colors p-1 opacity-0 group-hover:opacity-100">
-                                                    <Trash2 size={16}/>
-                                                </button>
+                                                <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg"><Banknote size={20}/></div>
+                                                <span className="text-sm font-medium text-stone-300">Efectivo Físico</span>
                                             </div>
+                                            <span className="font-bold text-xl">${savingsBalance.cash.toLocaleString()}</span>
                                         </div>
-                                    ))}
+                                        <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10 backdrop-blur-sm">
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg"><CreditCard size={20}/></div>
+                                                <span className="text-sm font-medium text-stone-300">Banco Digital</span>
+                                            </div>
+                                            <span className="font-bold text-xl">${savingsBalance.digital.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* BOTONES DE ACCIÓN (INGRESAR / RETIRAR) */}
+                                <div className="relative z-10 mt-8 md:mt-0 grid grid-cols-2 gap-3">
+                                    <button onClick={() => { 
+                                        setSavingsForm({ amount: '', destination: 'cash', source: 'business', businessAccount: 'cash', date: new Date().toISOString() });
+                                        setIsSavingsModalOpen(false); 
+                                        setIsSavingsDepositModalOpen(true); 
+                                    }} className="py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex flex-col items-center justify-center gap-1 shadow-lg shadow-emerald-900/40 transition-all active:scale-95">
+                                        <ArrowDownLeft size={20}/>
+                                        <span>Ingresar</span>
+                                    </button>
+                                    
+                                    <button onClick={() => { 
+                                        setSavingsForm({ amount: '', destination: 'business', source: 'cash', businessAccount: 'cash', date: new Date().toISOString() });
+                                        setIsSavingsModalOpen(false); 
+                                        setIsSavingsDepositModalOpen(true); 
+                                    }} className="py-4 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold flex flex-col items-center justify-center gap-1 border border-white/10 transition-all active:scale-95">
+                                        <ArrowUpRight size={20}/>
+                                        <span>Retirar</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* COLUMNA DERECHA: HISTORIAL */}
+                            <div className="w-full md:w-7/12 bg-stone-50 p-6 md:p-8 flex flex-col h-full overflow-hidden">
+                                <h4 className="font-bold text-stone-800 text-lg mb-6 flex items-center gap-2"><Activity size={20} className="text-stone-400"/> Movimientos Recientes</h4>
+
+                                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
+                                    {savingsLogs.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-stone-400 space-y-3 opacity-60">
+                                            <PiggyBank size={48} strokeWidth={1}/><p>Aún no has guardado nada.</p>
+                                        </div>
+                                    ) : (
+                                        savingsLogs.map((log, i) => (
+                                            <div key={i} className="flex justify-between items-center p-4 bg-white rounded-xl border border-stone-100 shadow-sm hover:shadow-md transition-all group">
+                                                <div className="flex items-center gap-4">
+                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${log.type === 'deposit' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-50 text-red-500'}`}>
+                                                        {log.type === 'deposit' ? <ArrowDownLeft size={20}/> : <ArrowUpRight size={20}/>}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-bold text-stone-800 text-sm">
+                                                            {log.type === 'deposit' ? 'Depósito' : 'Retiro'} 
+                                                            <span className="text-stone-400 font-normal ml-2 text-xs">{new Date(log.date).toLocaleDateString()}</span>
+                                                        </p>
+                                                        <div className="flex items-center gap-2 mt-1">
+                                                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-stone-100 text-stone-500 border-stone-200">
+                                                                {log.type === 'deposit' 
+                                                                    ? (log.source === 'business' ? 'Desde Negocio' : 'Externo')
+                                                                    : (log.source === 'cash' ? 'Desde Efvo' : 'Desde Digital')}
+                                                            </span>
+                                                            <ArrowRight size={10} className="text-stone-300"/>
+                                                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-stone-100 text-stone-500 border-stone-200">
+                                                                {log.type === 'deposit'
+                                                                    ? (log.destination === 'cash' ? 'A Efvo' : 'A Digital')
+                                                                    : (log.destination === 'business' ? 'Al Negocio' : 'Externo')}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-4">
+                                                    <span className={`font-bold font-mono text-lg ${log.type === 'deposit' ? 'text-emerald-600' : 'text-stone-900'}`}>{log.type === 'deposit' ? '+' : '-'}${parseFloat(log.amount).toLocaleString()}</span>
+                                                    <button onClick={() => handleDelete('savings_logs', log.id)} className="p-2 text-stone-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"><Trash2 size={16} /></button>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         </div>
                     </Modal>
-					
-					{/* NUEVO: MODAL RETIRO AHORRO (GASTO PERSONAL) */}
-                    <Modal isOpen={isSavingsWithdrawalModalOpen} onClose={() => setIsSavingsWithdrawalModalOpen(false)} title="Retirar de Alcancía">
-                        <form onSubmit={handleSaveSavingsWithdrawal} className="space-y-6">
-                            
-                            <div className="bg-red-50 border border-red-100 p-4 rounded-xl flex gap-3">
-                                <div className="bg-white p-2 rounded-full text-red-500 h-fit shadow-sm"><User size={20}/></div>
-                                <div>
-                                    <p className="text-sm font-bold text-red-800">Uso Personal</p>
-                                    <p className="text-xs text-red-600 mt-1">Si eliges "Gasto Personal", se creará automáticamente un registro en tus gastos y restará de tus ahorros.</p>
-                                </div>
-                            </div>
 
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto a Retirar</label>
-                                <input type="number" autoFocus className="w-full p-4 bg-stone-50 border rounded-xl font-mono text-2xl font-bold text-center text-red-600" value={savingsWithdrawalForm.amount} onChange={e => setSavingsWithdrawalForm({...savingsWithdrawalForm, amount: e.target.value})} placeholder="$0" />
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">¿De qué alcancía sale?</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button type="button" onClick={() => setSavingsWithdrawalForm({...savingsWithdrawalForm, source: 'cash'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsWithdrawalForm.source === 'cash' ? 'bg-stone-800 text-white shadow-lg' : 'bg-white border-stone-200 text-stone-400'}`}>
-                                        <Banknote size={24}/>
-                                        <span className="font-bold text-sm">Efectivo</span>
-                                    </button>
-                                    <button type="button" onClick={() => setSavingsWithdrawalForm({...savingsWithdrawalForm, source: 'transfer'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsWithdrawalForm.source === 'transfer' ? 'bg-stone-800 text-white shadow-lg' : 'bg-white border-stone-200 text-stone-400'}`}>
-                                        <CreditCard size={24}/>
-                                        <span className="font-bold text-sm">Digital</span>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Motivo / Destino</label>
-                                <div className="grid grid-cols-1 gap-2">
-                                    <button type="button" onClick={() => setSavingsWithdrawalForm({...savingsWithdrawalForm, destination: 'personal'})} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${savingsWithdrawalForm.destination === 'personal' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-white border-stone-200 text-stone-400'}`}>
-                                        <span className="font-bold text-sm flex items-center gap-2"><User size={16}/> Gasto Personal</span>
-                                        {savingsWithdrawalForm.destination === 'personal' && <Check size={16}/>}
-                                    </button>
-                                    <button type="button" onClick={() => setSavingsWithdrawalForm({...savingsWithdrawalForm, destination: 'business'})} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${savingsWithdrawalForm.destination === 'business' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-stone-200 text-stone-400'}`}>
-                                        <span className="font-bold text-sm flex items-center gap-2"><Briefcase size={16}/> Vuelta al Negocio</span>
-                                        {savingsWithdrawalForm.destination === 'business' && <Check size={16}/>}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Detalle (Opcional)</label>
-                                <input type="text" className="w-full p-3 bg-stone-50 border rounded-xl" placeholder="Ej: Cena, Regalo..." value={savingsWithdrawalForm.detail} onChange={e => setSavingsWithdrawalForm({...savingsWithdrawalForm, detail: e.target.value})} />
-                            </div>
-
-                            <button type="submit" disabled={isSaving} className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-red-900/20">
-                                Confirmar Retiro
-                            </button>
-                        </form>
-                    </Modal>
-
-                    {/* 2. MODAL DEPOSITO AHORRO (Formulario) */}
-                    <Modal isOpen={isSavingsDepositModalOpen} onClose={() => setIsSavingsDepositModalOpen(false)} title="Ingresar a la Alcancía">
+                    {/* 2. MODAL FORMULARIO (DINÁMICO: INGRESAR O RETIRAR) */}
+                    <Modal isOpen={isSavingsDepositModalOpen} onClose={() => setIsSavingsDepositModalOpen(false)} title={savingsForm.source === 'cash' || savingsForm.source === 'transfer' ? "Retirar Dinero" : "Ingresar Dinero"}>
                         <form onSubmit={handleSaveSavingsDeposit} className="space-y-6">
                             
+                            {/* CAMPO DE FECHA */}
                             <div className="space-y-1">
                                 <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha y Hora</label>
                                 <div className="relative">
@@ -3081,52 +2868,233 @@ const handleDoneConfirm = async () => {
                                 </div>
                             </div>
 
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">¿A dónde guardas el dinero?</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'cash'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'cash' ? 'bg-emerald-50 border-emerald-200 ring-1 ring-emerald-500' : 'bg-white border-stone-200 grayscale opacity-70'}`}>
-                                        <Banknote size={24} className="text-emerald-600"/>
-                                        <span className="font-bold text-sm text-emerald-800">Caja Ahorro (Efvo)</span>
-                                    </button>
-                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'transfer'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'transfer' ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500' : 'bg-white border-stone-200 grayscale opacity-70'}`}>
-                                        <CreditCard size={24} className="text-blue-600"/>
-                                        <span className="font-bold text-sm text-blue-800">Cuenta Ahorro (Dig)</span>
-                                    </button>
-                                </div>
-                            </div>
+                            {/* LOGICA DINAMICA: SI ES RETIRO (Source es Alcancía) VS INGRESO (Source es Negocio/Externo) */}
+                            {(() => {
+                                const isWithdrawal = savingsForm.source === 'cash' || savingsForm.source === 'transfer';
 
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto</label>
-                                <input type="number" autoFocus className="w-full p-3 bg-stone-50 border rounded-xl font-mono text-xl" value={savingsForm.amount} onChange={e => setSavingsForm({...savingsForm, amount: e.target.value})} />
-                            </div>
-
-                            <div className="bg-stone-100 p-4 rounded-xl space-y-3">
-                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest flex items-center gap-2"><MapPin size={14}/> ¿De dónde sacaste el dinero?</label>
-                                <div className="grid grid-cols-1 gap-2">
-                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'external'})} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${savingsForm.source === 'external' ? 'bg-white border-stone-300 shadow-sm' : 'border-transparent text-stone-400 hover:bg-stone-200'}`}>
-                                        <span className="text-sm font-bold">Dinero Externo / Aporte Personal</span>
-                                        {savingsForm.source === 'external' && <Check size={16} className="text-stone-900"/>}
-                                    </button>
-                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'business'})} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${savingsForm.source === 'business' ? 'bg-white border-red-300 shadow-sm text-red-600' : 'border-transparent text-stone-400 hover:bg-stone-200'}`}>
-                                        <span className="text-sm font-bold">Sacar del Negocio</span>
-                                        {savingsForm.source === 'business' && <Check size={16} className="text-red-600"/>}
-                                    </button>
-                                </div>
-
-                                {savingsForm.source === 'business' && (
-                                    <div className="animate-in slide-in-from-top-2 pt-2 border-t border-stone-200 mt-2">
-                                        <p className="text-[10px] font-bold text-stone-500 uppercase mb-2">Elegir cuenta de origen (Negocio)</p>
-                                        <div className="flex gap-2">
-                                            <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'cash'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'cash' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-white text-stone-400 border-stone-200'}`}>Caja Efectivo</button>
-                                            <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'transfer'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'transfer' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-white text-stone-400 border-stone-200'}`}>Banco Digital</button>
+                                return (
+                                    <>
+                                        {/* ORIGEN */}
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-stone-500 uppercase tracking-widest flex items-center gap-2">
+                                                <ArrowUpRight size={14} className={isWithdrawal ? "text-red-500" : "text-stone-400"}/> 
+                                                {isWithdrawal ? "¿De qué alcancía sacas?" : "¿De dónde viene el dinero?"}
+                                            </label>
+                                            
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {isWithdrawal ? (
+                                                    // OPCIONES PARA RETIRAR (ORIGEN = ALCANCIA)
+                                                    <>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'cash'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.source === 'cash' ? 'bg-amber-50 border-amber-200 ring-1 ring-amber-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <Banknote size={24} className="text-amber-600"/>
+                                                            <span className="font-bold text-sm text-amber-800">Alcancía Física</span>
+                                                        </button>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'transfer'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.source === 'transfer' ? 'bg-amber-50 border-amber-200 ring-1 ring-amber-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <CreditCard size={24} className="text-amber-600"/>
+                                                            <span className="font-bold text-sm text-amber-800">Alcancía Digital</span>
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    // OPCIONES PARA INGRESAR (ORIGEN = NEGOCIO/EXTERNO)
+                                                    <>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'business'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.source === 'business' ? 'bg-red-50 border-red-200 ring-1 ring-red-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <Briefcase size={24} className="text-red-600"/>
+                                                            <span className="font-bold text-sm text-red-800">Del Negocio</span>
+                                                        </button>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'external'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.source === 'external' ? 'bg-stone-100 border-stone-300 ring-1 ring-stone-400' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <User size={24} className="text-stone-600"/>
+                                                            <span className="font-bold text-sm text-stone-800">Externo / Mío</span>
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                            
+                                            {/* Si saca del negocio (Ingreso), elige cuenta */}
+                                            {(!isWithdrawal && savingsForm.source === 'business') && (
+                                                <div className="flex gap-2 mt-2 animate-in fade-in">
+                                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'cash'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'cash' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-white text-stone-400 border-stone-200'}`}>Caja Efectivo</button>
+                                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'transfer'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'transfer' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-white text-stone-400 border-stone-200'}`}>Banco Digital</button>
+                                                </div>
+                                            )}
                                         </div>
-                                        <p className="text-[10px] text-red-500 mt-2 flex items-center gap-1"><AlertTriangle size={12}/> Se generará un GASTO automáticamente.</p>
-                                    </div>
-                                )}
+
+                                        {/* MONTO */}
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto</label>
+                                            <input type="number" autoFocus className="w-full p-4 bg-stone-50 border rounded-xl font-mono text-2xl font-bold text-center" value={savingsForm.amount} onChange={e => setSavingsForm({...savingsForm, amount: e.target.value})} />
+                                        </div>
+
+                                        {/* DESTINO */}
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-stone-500 uppercase tracking-widest flex items-center gap-2">
+                                                <ArrowDownLeft size={14} className={!isWithdrawal ? "text-emerald-500" : "text-stone-400"}/> 
+                                                {isWithdrawal ? "¿A dónde llevas el dinero?" : "¿A qué alcancía va?"}
+                                            </label>
+
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {isWithdrawal ? (
+                                                    // DESTINO RETIRO (NEGOCIO O EXTERNO)
+                                                    <>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'business'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'business' ? 'bg-emerald-50 border-emerald-200 ring-1 ring-emerald-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <Briefcase size={24} className="text-emerald-600"/>
+                                                            <span className="font-bold text-sm text-emerald-800">Al Negocio</span>
+                                                        </button>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'external'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'external' ? 'bg-stone-100 border-stone-300 ring-1 ring-stone-400' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <User size={24} className="text-stone-600"/>
+                                                            <span className="font-bold text-sm text-stone-800">Externo / Gasto</span>
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    // DESTINO INGRESO (ALCANCIA)
+                                                    <>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'cash'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'cash' ? 'bg-emerald-50 border-emerald-200 ring-1 ring-emerald-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <Banknote size={24} className="text-emerald-600"/>
+                                                            <span className="font-bold text-sm text-emerald-800">Alcancía Física</span>
+                                                        </button>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'transfer'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'transfer' ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <CreditCard size={24} className="text-blue-600"/>
+                                                            <span className="font-bold text-sm text-blue-800">Alcancía Digital</span>
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+
+                                            {/* Si va al negocio (Retiro), elige cuenta */}
+                                            {(isWithdrawal && savingsForm.destination === 'business') && (
+                                                <div className="flex gap-2 mt-2 animate-in fade-in">
+                                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'cash'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'cash' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-white text-stone-400 border-stone-200'}`}>Caja Efectivo</button>
+                                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'transfer'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'transfer' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-white text-stone-400 border-stone-200'}`}>Banco Digital</button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
+                                );
+                            })()}
+
+                            <button type="submit" disabled={isSaving} className="w-full bg-stone-900 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-stone-800 transition-colors">
+                                Confirmar {savingsForm.source === 'cash' || savingsForm.source === 'transfer' ? 'Retiro' : 'Ingreso'} <ArrowRight size={16}/>
+                            </button>
+                        </form>
+                    </Modal>
+
+                 {/* 2. MODAL FORMULARIO (DINÁMICO: INGRESAR O RETIRAR) */}
+                    <Modal isOpen={isSavingsDepositModalOpen} onClose={() => setIsSavingsDepositModalOpen(false)} title={savingsForm.source === 'cash' || savingsForm.source === 'transfer' ? "Retirar Dinero" : "Ingresar Dinero"}>
+                        <form onSubmit={handleSaveSavingsDeposit} className="space-y-6">
+                            
+                            {/* CAMPO DE FECHA */}
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Fecha y Hora</label>
+                                <div className="relative">
+                                    <input type="datetime-local" className="w-full p-3 pl-10 bg-stone-50 border rounded-xl" value={savingsForm.date.slice(0, 16)} onChange={e => setSavingsForm({...savingsForm, date: e.target.value})} />
+                                    <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
+                                </div>
                             </div>
 
-                            <button type="submit" disabled={isSaving} className="w-full bg-stone-900 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2">
-                                Confirmar Ingreso <ArrowRight size={16}/>
+                            {/* LOGICA DINAMICA: SI ES RETIRO (Source es Alcancía) VS INGRESO (Source es Negocio/Externo) */}
+                            {(() => {
+                                const isWithdrawal = savingsForm.source === 'cash' || savingsForm.source === 'transfer';
+
+                                return (
+                                    <>
+                                        {/* ORIGEN */}
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-stone-500 uppercase tracking-widest flex items-center gap-2">
+                                                <ArrowUpRight size={14} className={isWithdrawal ? "text-red-500" : "text-stone-400"}/> 
+                                                {isWithdrawal ? "¿De qué alcancía sacas?" : "¿De dónde viene el dinero?"}
+                                            </label>
+                                            
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {isWithdrawal ? (
+                                                    // OPCIONES PARA RETIRAR (ORIGEN = ALCANCIA)
+                                                    <>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'cash'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.source === 'cash' ? 'bg-amber-50 border-amber-200 ring-1 ring-amber-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <Banknote size={24} className="text-amber-600"/>
+                                                            <span className="font-bold text-sm text-amber-800">Alcancía Física</span>
+                                                        </button>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'transfer'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.source === 'transfer' ? 'bg-amber-50 border-amber-200 ring-1 ring-amber-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <CreditCard size={24} className="text-amber-600"/>
+                                                            <span className="font-bold text-sm text-amber-800">Alcancía Digital</span>
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    // OPCIONES PARA INGRESAR (ORIGEN = NEGOCIO/EXTERNO)
+                                                    <>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'business'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.source === 'business' ? 'bg-red-50 border-red-200 ring-1 ring-red-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <Briefcase size={24} className="text-red-600"/>
+                                                            <span className="font-bold text-sm text-red-800">Del Negocio</span>
+                                                        </button>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, source: 'external'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.source === 'external' ? 'bg-stone-100 border-stone-300 ring-1 ring-stone-400' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <User size={24} className="text-stone-600"/>
+                                                            <span className="font-bold text-sm text-stone-800">Externo / Mío</span>
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                            
+                                            {/* Si saca del negocio (Ingreso), elige cuenta */}
+                                            {(!isWithdrawal && savingsForm.source === 'business') && (
+                                                <div className="flex gap-2 mt-2 animate-in fade-in">
+                                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'cash'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'cash' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-white text-stone-400 border-stone-200'}`}>Caja Efectivo</button>
+                                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'transfer'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'transfer' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-white text-stone-400 border-stone-200'}`}>Banco Digital</button>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* MONTO */}
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-bold text-stone-500 uppercase tracking-widest">Monto</label>
+                                            <input type="number" autoFocus className="w-full p-4 bg-stone-50 border rounded-xl font-mono text-2xl font-bold text-center" value={savingsForm.amount} onChange={e => setSavingsForm({...savingsForm, amount: e.target.value})} />
+                                        </div>
+
+                                        {/* DESTINO */}
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-stone-500 uppercase tracking-widest flex items-center gap-2">
+                                                <ArrowDownLeft size={14} className={!isWithdrawal ? "text-emerald-500" : "text-stone-400"}/> 
+                                                {isWithdrawal ? "¿A dónde llevas el dinero?" : "¿A qué alcancía va?"}
+                                            </label>
+
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {isWithdrawal ? (
+                                                    // DESTINO RETIRO (NEGOCIO O EXTERNO)
+                                                    <>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'business'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'business' ? 'bg-emerald-50 border-emerald-200 ring-1 ring-emerald-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <Briefcase size={24} className="text-emerald-600"/>
+                                                            <span className="font-bold text-sm text-emerald-800">Al Negocio</span>
+                                                        </button>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'external'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'external' ? 'bg-stone-100 border-stone-300 ring-1 ring-stone-400' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <User size={24} className="text-stone-600"/>
+                                                            <span className="font-bold text-sm text-stone-800">Externo / Gasto</span>
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    // DESTINO INGRESO (ALCANCIA)
+                                                    <>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'cash'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'cash' ? 'bg-emerald-50 border-emerald-200 ring-1 ring-emerald-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <Banknote size={24} className="text-emerald-600"/>
+                                                            <span className="font-bold text-sm text-emerald-800">Alcancía Física</span>
+                                                        </button>
+                                                        <button type="button" onClick={() => setSavingsForm({...savingsForm, destination: 'transfer'})} className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${savingsForm.destination === 'transfer' ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500' : 'bg-white border-stone-200 opacity-60'}`}>
+                                                            <CreditCard size={24} className="text-blue-600"/>
+                                                            <span className="font-bold text-sm text-blue-800">Alcancía Digital</span>
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+
+                                            {/* Si va al negocio (Retiro), elige cuenta */}
+                                            {(isWithdrawal && savingsForm.destination === 'business') && (
+                                                <div className="flex gap-2 mt-2 animate-in fade-in">
+                                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'cash'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'cash' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-white text-stone-400 border-stone-200'}`}>Caja Efectivo</button>
+                                                    <button type="button" onClick={() => setSavingsForm({...savingsForm, businessAccount: 'transfer'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${savingsForm.businessAccount === 'transfer' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-white text-stone-400 border-stone-200'}`}>Banco Digital</button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
+                                );
+                            })()}
+
+                            <button type="submit" disabled={isSaving} className="w-full bg-stone-900 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-stone-800 transition-colors">
+                                Confirmar {savingsForm.source === 'cash' || savingsForm.source === 'transfer' ? 'Retiro' : 'Ingreso'} <ArrowRight size={16}/>
                             </button>
                         </form>
                     </Modal>
