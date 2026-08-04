@@ -106,7 +106,7 @@
             Clock, Crown, Layers, Scissors, Shirt, Users,
             Package, FileText, ClipboardList, ChevronDown, ChevronUp,
             CalendarClock, Menu, Grid, ShoppingCart, Briefcase,
-            PiggyBank, ArrowLeftRight, ArrowRight
+            PiggyBank, ArrowLeftRight, ArrowRight, Share2, Download, Copy
         } from 'lucide-react';
 		
         // --- FIREBASE SETUP ---
@@ -205,6 +205,187 @@
                     <IconComponent size={22} color={color} strokeWidth={1.5} />
                 </div>
             );
+        };
+
+        const formatQuoteCurrency = (value) => new Intl.NumberFormat('es-AR', {
+            style: 'currency',
+            currency: 'ARS',
+            maximumFractionDigits: 0
+        }).format(Number(value) || 0);
+
+        const getQuoteItems = (order) => {
+            if (order?.items && Array.isArray(order.items) && order.items.length > 0) return order.items;
+            return [{
+                detail: order?.detail || 'Pedido',
+                quantity: order?.quantity || 1,
+                unitPrice: (Number(order?.price) || 0) / (order?.quantity || 1),
+                totalPrice: Number(order?.price) || 0
+            }];
+        };
+
+        const roundedRect = (ctx, x, y, width, height, radius) => {
+            const r = Math.min(radius, width / 2, height / 2);
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + width, y, x + width, y + height, r);
+            ctx.arcTo(x + width, y + height, x, y + height, r);
+            ctx.arcTo(x, y + height, x, y, r);
+            ctx.arcTo(x, y, x + width, y, r);
+            ctx.closePath();
+        };
+
+        const fitCanvasText = (ctx, text, maxWidth) => {
+            const value = String(text || '');
+            if (ctx.measureText(value).width <= maxWidth) return value;
+            let shortened = value;
+            while (shortened.length > 1 && ctx.measureText(`${shortened}…`).width > maxWidth) shortened = shortened.slice(0, -1);
+            return `${shortened}…`;
+        };
+
+        const createOrderQuoteBlob = async (order) => {
+            if (document.fonts?.ready) await document.fonts.ready;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 1080;
+            canvas.height = 1350;
+            const ctx = canvas.getContext('2d');
+            const items = getQuoteItems(order);
+            const visibleItems = items.slice(0, 7);
+            const margin = 76;
+
+            const background = ctx.createLinearGradient(0, 0, 1080, 1350);
+            background.addColorStop(0, '#0c0a09');
+            background.addColorStop(0.6, '#1c1917');
+            background.addColorStop(1, '#292524');
+            ctx.fillStyle = background;
+            ctx.fillRect(0, 0, 1080, 1350);
+
+            ctx.fillStyle = 'rgba(217, 119, 6, 0.14)';
+            ctx.beginPath();
+            ctx.arc(980, 80, 310, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
+            ctx.beginPath();
+            ctx.arc(40, 1260, 360, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#d97706';
+            roundedRect(ctx, margin, 72, 76, 76, 20);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '700 38px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('O', margin + 38, 124);
+
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '700 48px "Playfair Display", serif';
+            ctx.fillText('OSIRIS', 178, 118);
+            ctx.fillStyle = '#a8a29e';
+            ctx.font = '600 17px Inter, sans-serif';
+            ctx.letterSpacing = '5px';
+            ctx.fillText('VESTITE PARA GANAR', 180, 146);
+            ctx.letterSpacing = '0px';
+
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#fbbf24';
+            ctx.font = '700 18px Inter, sans-serif';
+            ctx.fillText('PRESUPUESTO', 1004, 104);
+            ctx.fillStyle = '#a8a29e';
+            ctx.font = '500 17px Inter, sans-serif';
+            const quoteDate = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(order.date || Date.now()));
+            ctx.fillText(quoteDate, 1004, 137);
+
+            ctx.fillStyle = '#ffffff';
+            roundedRect(ctx, margin, 205, 928, 1010, 28);
+            ctx.fill();
+
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#78716c';
+            ctx.font = '700 16px Inter, sans-serif';
+            ctx.fillText('PREPARADO PARA', 124, 273);
+            ctx.fillStyle = '#1c1917';
+            ctx.font = '700 43px "Playfair Display", serif';
+            ctx.fillText(fitCanvasText(ctx, order.client || 'Cliente', 760), 124, 327);
+
+            ctx.strokeStyle = '#e7e5e4';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(124, 371);
+            ctx.lineTo(956, 371);
+            ctx.stroke();
+
+            ctx.fillStyle = '#a8a29e';
+            ctx.font = '700 15px Inter, sans-serif';
+            ctx.fillText('PRODUCTO', 124, 421);
+            ctx.textAlign = 'center';
+            ctx.fillText('CANT.', 655, 421);
+            ctx.textAlign = 'right';
+            ctx.fillText('SUBTOTAL', 956, 421);
+
+            let y = 478;
+            visibleItems.forEach((item, index) => {
+                const quantity = Number(item.quantity) || 1;
+                const subtotal = Number(item.totalPrice) || quantity * (Number(item.unitPrice) || 0);
+                ctx.textAlign = 'left';
+                ctx.fillStyle = '#292524';
+                ctx.font = '600 24px Inter, sans-serif';
+                ctx.fillText(fitCanvasText(ctx, item.detail || 'Producto', 470), 124, y);
+                ctx.fillStyle = '#a8a29e';
+                ctx.font = '500 17px Inter, sans-serif';
+                ctx.fillText(`${formatQuoteCurrency(item.unitPrice)} c/u`, 124, y + 29);
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#57534e';
+                ctx.font = '600 22px Inter, sans-serif';
+                ctx.fillText(String(quantity), 655, y + 8);
+                ctx.textAlign = 'right';
+                ctx.fillStyle = '#1c1917';
+                ctx.font = '700 23px Inter, sans-serif';
+                ctx.fillText(formatQuoteCurrency(subtotal), 956, y + 8);
+                if (index < visibleItems.length - 1) {
+                    ctx.strokeStyle = '#f5f5f4';
+                    ctx.beginPath();
+                    ctx.moveTo(124, y + 51);
+                    ctx.lineTo(956, y + 51);
+                    ctx.stroke();
+                }
+                y += 77;
+            });
+
+            if (items.length > visibleItems.length) {
+                ctx.textAlign = 'left';
+                ctx.fillStyle = '#d97706';
+                ctx.font = '700 18px Inter, sans-serif';
+                ctx.fillText(`+ ${items.length - visibleItems.length} productos más`, 124, y + 5);
+            }
+
+            const totalBoxY = 1040;
+            ctx.fillStyle = '#f5f5f4';
+            roundedRect(ctx, 108, totalBoxY, 864, 126, 20);
+            ctx.fill();
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#78716c';
+            ctx.font = '700 17px Inter, sans-serif';
+            ctx.fillText('TOTAL', 144, totalBoxY + 48);
+            ctx.fillStyle = '#44403c';
+            ctx.font = '500 16px Inter, sans-serif';
+            ctx.fillText('Presupuesto expresado en pesos argentinos', 144, totalBoxY + 80);
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#1c1917';
+            ctx.font = '700 43px "Playfair Display", serif';
+            ctx.fillText(formatQuoteCurrency(order.price), 936, totalBoxY + 77);
+
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#d6d3d1';
+            ctx.font = '500 17px Inter, sans-serif';
+            ctx.fillText('Gracias por elegirnos', 540, 1272);
+            ctx.fillStyle = '#d97706';
+            ctx.font = '700 15px Inter, sans-serif';
+            ctx.fillText('OSIRIS · VESTITE PARA GANAR', 540, 1305);
+
+            return new Promise((resolve, reject) => {
+                canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('No se pudo generar la imagen')), 'image/png', 1);
+            });
         };
 
         // --- CUSTOM SELECTOR COMPONENT ---
@@ -449,6 +630,11 @@
             // Modales Generales
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {}, isDanger: false, confirmText: 'Confirmar' });
+            const [isQuoteShareOpen, setIsQuoteShareOpen] = useState(false);
+            const [quoteOrder, setQuoteOrder] = useState(null);
+            const [quoteBlob, setQuoteBlob] = useState(null);
+            const [quotePreviewUrl, setQuotePreviewUrl] = useState('');
+            const [isGeneratingQuote, setIsGeneratingQuote] = useState(false);
             
             // Order State (CART FUNCTIONALITY ADDED)
             const [editingId, setEditingId] = useState(null);
@@ -963,6 +1149,97 @@
                 }));
             };
 
+            const buildQuoteImage = async (order) => {
+                setIsGeneratingQuote(true);
+                try {
+                    const blob = await createOrderQuoteBlob(order);
+                    setQuoteBlob(blob);
+                    setQuotePreviewUrl(previousUrl => {
+                        if (previousUrl) URL.revokeObjectURL(previousUrl);
+                        return URL.createObjectURL(blob);
+                    });
+                    return blob;
+                } catch (error) {
+                    console.error(error);
+                    addToast('No se pudo generar la imagen. Intenta nuevamente.', 'error');
+                    return null;
+                } finally {
+                    setIsGeneratingQuote(false);
+                }
+            };
+
+            const openQuoteShare = (order) => {
+                setQuoteOrder(order);
+                setQuoteBlob(null);
+                setIsQuoteShareOpen(true);
+                buildQuoteImage(order);
+            };
+
+            const closeQuoteShare = () => {
+                setIsQuoteShareOpen(false);
+                setQuoteOrder(null);
+                setQuoteBlob(null);
+                setQuotePreviewUrl(previousUrl => {
+                    if (previousUrl) URL.revokeObjectURL(previousUrl);
+                    return '';
+                });
+            };
+
+            const getQuoteFile = async () => {
+                const blob = quoteBlob || (quoteOrder ? await buildQuoteImage(quoteOrder) : null);
+                if (!blob) return null;
+                const clientSlug = (quoteOrder?.client || 'cliente').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+                return new File([blob], `presupuesto-osiris-${clientSlug || 'cliente'}.png`, { type: 'image/png' });
+            };
+
+            const downloadQuote = async () => {
+                const file = await getQuoteFile();
+                if (!file) return;
+                const url = URL.createObjectURL(file);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = file.name;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                addToast('Imagen descargada');
+            };
+
+            const copyQuote = async () => {
+                const file = await getQuoteFile();
+                if (!file) return;
+                try {
+                    if (!navigator.clipboard || typeof ClipboardItem === 'undefined') throw new Error('Clipboard API unavailable');
+                    await navigator.clipboard.write([new ClipboardItem({ 'image/png': file })]);
+                    addToast('Imagen copiada. Ya puedes pegarla en WhatsApp.');
+                } catch (error) {
+                    await downloadQuote();
+                    addToast('Tu navegador no permite copiar imágenes; la descargamos por ti.', 'info');
+                }
+            };
+
+            const shareQuote = async () => {
+                const file = await getQuoteFile();
+                if (!file) return;
+                try {
+                    if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+                        await navigator.share({
+                            files: [file],
+                            title: `Presupuesto OSIRIS - ${quoteOrder?.client || 'Cliente'}`,
+                            text: `Hola ${quoteOrder?.client || ''}, te compartimos tu presupuesto de OSIRIS.`
+                        });
+                        return;
+                    }
+                    await copyQuote();
+                } catch (error) {
+                    if (error?.name !== 'AbortError') {
+                        console.error(error);
+                        addToast('No se pudo compartir. Puedes descargar la imagen.', 'error');
+                    }
+                }
+            };
+
             const handleSaveOrder = async (e) => {
                 e.preventDefault();
                 if (isSaving) return;
@@ -1003,12 +1280,14 @@
                 };
 
                 try {
+                    let savedOrderId = editingId;
                     if (editingId) {
                         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', editingId), orderData);
                         addToast('Pedido actualizado');
                     } else {
                         orderData.createdAt = new Date().toISOString();
-                        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), orderData);
+                        const savedOrder = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), orderData);
+                        savedOrderId = savedOrder.id;
                         addToast('Pedido creado');
                         
                         const clientExists = clients.some(c => c.name.toLowerCase() === form.client.toLowerCase());
@@ -1028,7 +1307,8 @@
                         }
                     }
                     setIsModalOpen(false);
-                } catch (err) { console.error(err); addToast('Error al guardar', 'error'); } 
+                    openQuoteShare({ id: savedOrderId, ...orderData });
+                } catch (err) { console.error(err); addToast('Error al guardar', 'error'); }
                 finally { setIsSaving(false); }
             };
             
@@ -1631,11 +1911,12 @@ const handleDoneConfirm = async () => {
                                                                 )}
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <button onClick={() => toggleStatus(order, 'important')} className={`p-2 rounded-lg transition-colors ${order.important ? 'text-amber-500 bg-amber-50' : 'text-stone-300 hover:bg-stone-50'}`}><Star size={18} fill={order.important ? "currentColor" : "none"} /></button>
-                                                        <button onClick={() => openEditModal(order)} className="p-2 text-stone-300 hover:text-stone-800 hover:bg-stone-50 rounded-lg"><Pencil size={18} /></button>
-                                                    </div>
+                                                     </div>
+                                                     <div className="flex gap-2">
+                                                         <button aria-label={`Compartir presupuesto de ${order.client}`} title="Compartir presupuesto" onClick={() => openQuoteShare(order)} className="p-2 text-stone-400 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors"><Share2 size={18} /></button>
+                                                         <button aria-label={order.important ? 'Quitar de importantes' : 'Marcar como importante'} onClick={() => toggleStatus(order, 'important')} className={`p-2 rounded-lg transition-colors ${order.important ? 'text-amber-500 bg-amber-50' : 'text-stone-300 hover:bg-stone-50'}`}><Star size={18} fill={order.important ? "currentColor" : "none"} /></button>
+                                                         <button aria-label={`Editar pedido de ${order.client}`} onClick={() => openEditModal(order)} className="p-2 text-stone-300 hover:text-stone-800 hover:bg-stone-50 rounded-lg"><Pencil size={18} /></button>
+                                                     </div>
                                                 </div>
                                                 
                                                 <div className="pl-[4.5rem]">
@@ -2282,6 +2563,48 @@ const handleDoneConfirm = async () => {
                             <div className="pt-2"><button type="button" onClick={() => setForm({...form, important: !form.important})} className={`w-full py-3 rounded-xl border flex items-center justify-center gap-2 transition-colors ${form.important ? 'bg-amber-50 border-amber-200 text-amber-600' : 'bg-white border-stone-200 text-stone-400'}`}><Star size={18} fill={form.important ? "currentColor" : "none"} /> Marcar como Importante</button></div>
                             <button type="submit" disabled={isSaving} className="w-full bg-stone-900 hover:bg-stone-800 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 mt-4">{isSaving ? <Loader2 className="animate-spin"/> : (editingId ? 'Guardar Cambios' : 'Registrar Pedido')}</button>
                         </form>
+                    </Modal>
+
+                    <Modal isOpen={isQuoteShareOpen} onClose={closeQuoteShare} title="Presupuesto listo para compartir" maxWidth="max-w-3xl">
+                        <div className="grid md:grid-cols-[minmax(0,1fr)_280px] gap-6 items-start">
+                            <div className="bg-stone-100 rounded-2xl border border-stone-200 overflow-hidden min-h-[320px] flex items-center justify-center">
+                                {isGeneratingQuote ? (
+                                    <div className="py-20 flex flex-col items-center gap-3 text-stone-500" role="status" aria-live="polite">
+                                        <Loader2 className="animate-spin text-amber-600" size={28}/>
+                                        <span className="text-sm font-medium">Armando la imagen…</span>
+                                    </div>
+                                ) : quotePreviewUrl ? (
+                                    <img src={quotePreviewUrl} alt={`Vista previa del presupuesto de ${quoteOrder?.client || 'cliente'}`} className="w-full h-auto block" />
+                                ) : (
+                                    <div className="py-20 text-center text-stone-500">
+                                        <AlertCircle className="mx-auto mb-3 text-red-500" size={28}/>
+                                        <p className="text-sm font-medium">No pudimos crear la vista previa.</p>
+                                        <button type="button" onClick={() => quoteOrder && buildQuoteImage(quoteOrder)} className="mt-3 px-4 py-2 rounded-lg bg-white border border-stone-200 text-xs font-bold hover:bg-stone-50">Reintentar</button>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <p className="text-xs font-bold uppercase tracking-widest text-amber-700 mb-2">Sin pasar por Canva</p>
+                                    <h4 className="text-xl font-bold text-stone-900 brand-font">Ya está lista para enviar</h4>
+                                    <p className="text-sm text-stone-500 mt-2 leading-relaxed">En el celular, “Compartir imagen” abre WhatsApp y las demás aplicaciones. En la computadora también puedes copiarla y pegarla directamente en un chat.</p>
+                                </div>
+
+                                <button type="button" onClick={shareQuote} disabled={isGeneratingQuote || !quotePreviewUrl} className="w-full min-h-[48px] bg-stone-900 hover:bg-stone-800 text-white px-4 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <Share2 size={19}/> Compartir imagen
+                                </button>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button type="button" onClick={copyQuote} disabled={isGeneratingQuote || !quotePreviewUrl} className="min-h-[48px] bg-white hover:bg-stone-50 text-stone-700 border border-stone-200 px-3 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                        <Copy size={17}/> Copiar
+                                    </button>
+                                    <button type="button" onClick={downloadQuote} disabled={isGeneratingQuote || !quotePreviewUrl} className="min-h-[48px] bg-white hover:bg-stone-50 text-stone-700 border border-stone-200 px-3 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                        <Download size={17}/> Descargar
+                                    </button>
+                                </div>
+                                <button type="button" onClick={closeQuoteShare} className="w-full min-h-[44px] text-stone-500 hover:text-stone-800 text-sm font-semibold transition-colors">Cerrar</button>
+                            </div>
+                        </div>
                     </Modal>
 
                     {/* Client Modal */}
