@@ -56,6 +56,17 @@
             @apply stroke-[2.5px];
         }
         
+        /* Logo de marca (PNG transparente en negro) */
+        .brand-logo {
+            display: block;
+            width: auto;
+            object-fit: contain;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        /* Version clara: lo pinta en blanco para fondos oscuros */
+        .brand-logo--light { filter: invert(1); }
+
         /* Utiliarios estéticos */
         .glass-panel {
             background: rgba(255, 255, 255, 0.95);
@@ -158,9 +169,50 @@
             return hash;
         };
 
-        const BrandIcon = ({ size = 24, className = "" }) => (
-            <Crown size={size} className={className} strokeWidth={1.5} />
+        // --- LOGO OFICIAL OSIRIS ---
+        // Va embebido como data URI para que funcione siempre (offline, file:// y
+        // sobre todo al generar la imagen del presupuesto, donde un archivo externo
+        // podria "ensuciar" el canvas y romper la descarga).
+        const BRAND_LOGO_SRC = 'data:image/png;base64,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';
+
+        // tone="light" -> logo blanco (fondos oscuros) | tone="dark" -> logo negro (fondos claros)
+        const BrandIcon = ({ size = 24, className = "", tone = "light" }) => (
+            <img
+                src={BRAND_LOGO_SRC}
+                alt="Osiris"
+                draggable="false"
+                style={{ height: size }}
+                className={`brand-logo ${tone === 'light' ? 'brand-logo--light' : ''} ${className}`}
+            />
         );
+
+        // Carga (una sola vez) el logo para poder dibujarlo en canvas
+        let brandLogoPromise = null;
+        const loadBrandLogo = () => {
+            if (!brandLogoPromise) {
+                brandLogoPromise = new Promise(resolve => {
+                    const img = new Image();
+                    img.onload = () => resolve(img);
+                    img.onerror = () => resolve(null);
+                    img.src = BRAND_LOGO_SRC;
+                });
+            }
+            return brandLogoPromise;
+        };
+
+        // Devuelve un canvas con el logo pintado del color pedido, listo para drawImage
+        const tintedBrandLogo = (img, height, color) => {
+            const ratio = img.naturalWidth / img.naturalHeight;
+            const c = document.createElement('canvas');
+            c.height = Math.round(height);
+            c.width = Math.max(1, Math.round(height * ratio));
+            const cx = c.getContext('2d');
+            cx.drawImage(img, 0, 0, c.width, c.height);
+            cx.globalCompositeOperation = 'source-in';
+            cx.fillStyle = color;
+            cx.fillRect(0, 0, c.width, c.height);
+            return c;
+        };
 
         const identifyCategory = (text) => {
             if (!text) return 'Varios';
@@ -269,22 +321,32 @@
             ctx.arc(40, 1260, 360, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.fillStyle = '#d97706';
-            roundedRect(ctx, margin, 72, 76, 76, 20);
-            ctx.fill();
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '700 38px Inter, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('O', margin + 38, 124);
+            // --- LOGO DE MARCA EN LA CABECERA ---
+            const brandLogo = await loadBrandLogo();
+            let headerTextX = 178;
+            if (brandLogo) {
+                const logoMark = tintedBrandLogo(brandLogo, 106, '#ffffff');
+                ctx.drawImage(logoMark, margin, 62);
+                headerTextX = margin + logoMark.width + 32;
+            } else {
+                // Fallback por si el logo no carga
+                ctx.fillStyle = '#d97706';
+                roundedRect(ctx, margin, 72, 76, 76, 20);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '700 38px Inter, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('O', margin + 38, 124);
+            }
 
             ctx.textAlign = 'left';
             ctx.fillStyle = '#ffffff';
             ctx.font = '700 48px "Playfair Display", serif';
-            ctx.fillText('OSIRIS', 178, 118);
+            ctx.fillText('OSIRIS', headerTextX, 118);
             ctx.fillStyle = '#a8a29e';
             ctx.font = '600 17px Inter, sans-serif';
             ctx.letterSpacing = '5px';
-            ctx.fillText('VESTITE PARA GANAR', 180, 146);
+            ctx.fillText('VESTITE PARA GANAR', headerTextX + 2, 146);
             ctx.letterSpacing = '0px';
 
             ctx.textAlign = 'right';
@@ -299,6 +361,15 @@
             ctx.fillStyle = '#ffffff';
             roundedRect(ctx, margin, 205, 928, 1010, 28);
             ctx.fill();
+
+            // Marca de agua del logo dentro de la ficha
+            if (brandLogo) {
+                const watermark = tintedBrandLogo(brandLogo, 470, '#0c0a09');
+                ctx.save();
+                ctx.globalAlpha = 0.03;
+                ctx.drawImage(watermark, 540 - watermark.width / 2, 510);
+                ctx.restore();
+            }
 
             ctx.textAlign = 'left';
             ctx.fillStyle = '#78716c';
@@ -506,8 +577,9 @@
 
                     <div className="w-full max-w-sm relative z-10">
                         <div className="text-center mb-10">
-                            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-amber-500 to-amber-700 rounded-2xl shadow-2xl shadow-amber-900/30 mb-6">
-                                <BrandIcon size={40} className="text-white" />
+                            <div className="inline-flex items-center justify-center relative mb-6">
+                                <div className="absolute -inset-8 bg-amber-500/20 blur-3xl rounded-full"></div>
+                                <BrandIcon size={104} className="relative" />
                             </div>
                             <h1 className="text-4xl font-bold text-white brand-font tracking-wide mb-2">OSIRIS</h1>
                             <p className="text-stone-400 text-sm tracking-[0.2em] uppercase">Vestite para ganar</p>
@@ -716,6 +788,9 @@
 			
 			// Estado para el Reporte Diario
             const [isDailyReportOpen, setIsDailyReportOpen] = useState(false);
+
+            // Estado para el desglose del Patrimonio Global (Caja + Digital + Ahorros)
+            const [showGlobalDetail, setShowGlobalDetail] = useState(false);
 			
 			// --- NUEVOS ESTADOS PARA AHORROS Y MOVIMIENTOS ---
             const [savingsLogs, setSavingsLogs] = useState([]); 
@@ -1759,13 +1834,16 @@ const handleDoneConfirm = async () => {
 
                     {/* --- SIDEBAR (PC) --- */}
                     <aside className="hidden md:flex flex-col w-72 bg-[#0c0a09] border-r border-stone-800 h-full shrink-0 z-20 shadow-xl">
-                        <div className="p-8 flex items-center gap-4">
-                            <div className="bg-gradient-to-br from-amber-500 to-amber-600 text-white p-2.5 rounded-xl shadow-lg shadow-amber-900/40">
-                                <BrandIcon size={28} />
+                        <div className="px-8 py-7 flex items-center gap-4">
+                            {/* LOGO OFICIAL */}
+                            <div className="relative shrink-0">
+                                <div className="absolute -inset-4 bg-amber-500/15 blur-2xl rounded-full"></div>
+                                <BrandIcon size={52} className="relative" />
                             </div>
+                            <div className="h-11 w-px bg-gradient-to-b from-transparent via-amber-600/50 to-transparent shrink-0"></div>
                             <div>
-                                <h1 className="text-2xl font-bold text-white tracking-wide brand-font">OSIRIS</h1>
-                                <p className="text-[10px] text-stone-500 uppercase tracking-widest font-semibold mt-0.5">Manager</p>
+                                <h1 className="text-2xl font-bold text-white tracking-wide brand-font leading-none">OSIRIS</h1>
+                                <p className="text-[10px] text-stone-500 uppercase tracking-widest font-semibold mt-1.5">Manager</p>
                             </div>
                         </div>
 
@@ -1806,7 +1884,7 @@ const handleDoneConfirm = async () => {
                         {/* Top Bar Mobile */}
                         <div className="md:hidden bg-[#0c0a09] p-4 flex justify-between items-center shrink-0 z-30">
                             <div className="flex items-center gap-3">
-                                <BrandIcon size={24} className="text-amber-500" />
+                                <BrandIcon size={32} />
                                 <span className="text-white font-bold text-lg brand-font tracking-wide">OSIRIS</span>
                             </div>
                             <button onClick={() => { setEditingId(null); setForm({ client: '', items: [], price: 0, paid: false, delivered: false, important: false, date: new Date().toISOString().split('T')[0] }); setIsModalOpen(true); }} className="bg-amber-600 text-white p-2 rounded-lg shadow-lg active:scale-95 transition-transform"><Plus size={24}/></button>
@@ -2156,6 +2234,15 @@ const handleDoneConfirm = async () => {
             const realCashBalance = finances.totalCash;
             const realTransferBalance = finances.totalTransfer;
 
+            // 3.B PATRIMONIO GLOBAL (NEGOCIO + ALCANCÍA)
+            const savingsCash = savingsBalance.cash;
+            const savingsDigital = savingsBalance.digital;
+            const savingsTotal = savingsBalance.total;
+            const globalTotal = realCashBalance + realTransferBalance + savingsTotal;
+            const globalCash = realCashBalance + savingsCash;      // Todo el efectivo (negocio + alcancía)
+            const globalDigital = realTransferBalance + savingsDigital; // Todo lo digital (negocio + alcancía)
+            const globalPct = (v) => globalTotal > 0 ? Math.round((v / globalTotal) * 100) : 0;
+
             let displayLabel = 'Balance del Mes';
             if (financeFilter === 'cash') displayLabel = 'Balance Efectivo';
             else if (financeFilter === 'transfer') displayLabel = 'Balance Digital';
@@ -2236,6 +2323,120 @@ const handleDoneConfirm = async () => {
                         </div>
                     </div>
 					
+					{/* 1.B TARJETA PATRIMONIO GLOBAL (CAJA + DIGITAL + AHORROS) */}
+                    <div className="bg-gradient-to-br from-emerald-950 via-stone-900 to-[#0c0a09] text-white p-6 md:p-8 rounded-3xl shadow-2xl relative overflow-hidden border border-emerald-900/40">
+                        <div className="absolute right-0 bottom-0 p-8 opacity-[0.07]"><Coins size={170}/></div>
+
+                        <div className="relative z-10">
+                            {/* CABECERA */}
+                            <div className="flex items-start justify-between gap-4 mb-6">
+                                <div>
+                                    <div className="flex items-center gap-2 mb-2 text-emerald-400">
+                                        <Layers size={16}/>
+                                        <span className="text-xs font-bold uppercase tracking-[0.2em]">Patrimonio Total</span>
+                                    </div>
+                                    <h3 className="text-4xl md:text-5xl font-bold brand-font tracking-tight text-white">
+                                        ${globalTotal.toLocaleString()}
+                                    </h3>
+                                    <p className="text-[11px] text-stone-400 mt-2 font-medium">
+                                        Todo el dinero disponible: Caja + Digital + Ahorros
+                                    </p>
+                                </div>
+
+                                <button onClick={() => setShowGlobalDetail(!showGlobalDetail)}
+                                    className="shrink-0 bg-white/5 hover:bg-white/10 border border-white/10 text-stone-300 px-3 py-2 rounded-xl font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95">
+                                    {showGlobalDetail ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                                    Detalle
+                                </button>
+                            </div>
+
+                            {/* LOS 3 PILARES */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+                                    <div className="flex items-center gap-2 mb-2 text-amber-500">
+                                        <Banknote size={15}/>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider">En Caja</span>
+                                    </div>
+                                    <p className="font-bold text-2xl text-white">${realCashBalance.toLocaleString()}</p>
+                                    <p className="text-[10px] text-stone-500 mt-1 font-bold">{globalPct(realCashBalance)}% del total</p>
+                                </div>
+
+                                <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+                                    <div className="flex items-center gap-2 mb-2 text-blue-400">
+                                        <CreditCard size={15}/>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider">Digital</span>
+                                    </div>
+                                    <p className="font-bold text-2xl text-white">${realTransferBalance.toLocaleString()}</p>
+                                    <p className="text-[10px] text-stone-500 mt-1 font-bold">{globalPct(realTransferBalance)}% del total</p>
+                                </div>
+
+                                <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+                                    <div className="flex items-center gap-2 mb-2 text-emerald-400">
+                                        <PiggyBank size={15}/>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider">Ahorros</span>
+                                    </div>
+                                    <p className="font-bold text-2xl text-white">${savingsTotal.toLocaleString()}</p>
+                                    <p className="text-[10px] text-stone-500 mt-1 font-bold">{globalPct(savingsTotal)}% del total</p>
+                                </div>
+                            </div>
+
+                            {/* DESGLOSE AMPLIADO */}
+                            {showGlobalDetail && (
+                                <div className="mt-4 pt-5 border-t border-white/10 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+
+                                    {/* POR TIPO DE DINERO */}
+                                    <div>
+                                        <p className="text-[10px] text-stone-500 uppercase font-bold tracking-wider mb-2">Por tipo de dinero</p>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+                                                <p className="text-[10px] text-amber-500 font-bold uppercase mb-1">Efectivo Total</p>
+                                                <p className="font-bold text-lg text-white">${globalCash.toLocaleString()}</p>
+                                                <p className="text-[9px] text-stone-500 font-medium mt-0.5">Caja ${realCashBalance.toLocaleString()} + Alcancía ${savingsCash.toLocaleString()}</p>
+                                            </div>
+                                            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
+                                                <p className="text-[10px] text-blue-400 font-bold uppercase mb-1">Digital Total</p>
+                                                <p className="font-bold text-lg text-white">${globalDigital.toLocaleString()}</p>
+                                                <p className="text-[9px] text-stone-500 font-medium mt-0.5">Banco ${realTransferBalance.toLocaleString()} + Alcancía ${savingsDigital.toLocaleString()}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* POR UBICACIÓN */}
+                                    <div>
+                                        <p className="text-[10px] text-stone-500 uppercase font-bold tracking-wider mb-2">Por ubicación</p>
+                                        <div className="space-y-1.5">
+                                            <div className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2.5">
+                                                <span className="flex items-center gap-2 text-xs font-medium text-stone-300"><Banknote size={14} className="text-amber-500"/> Negocio · Efectivo</span>
+                                                <span className="font-bold text-sm text-white">${realCashBalance.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2.5">
+                                                <span className="flex items-center gap-2 text-xs font-medium text-stone-300"><CreditCard size={14} className="text-blue-400"/> Negocio · Banco Digital</span>
+                                                <span className="font-bold text-sm text-white">${realTransferBalance.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2.5">
+                                                <span className="flex items-center gap-2 text-xs font-medium text-stone-300"><PiggyBank size={14} className="text-emerald-400"/> Alcancía · Efectivo</span>
+                                                <span className="font-bold text-sm text-white">${savingsCash.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2.5">
+                                                <span className="flex items-center gap-2 text-xs font-medium text-stone-300"><PiggyBank size={14} className="text-emerald-400"/> Alcancía · Digital</span>
+                                                <span className="font-bold text-sm text-white">${savingsDigital.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-3 mt-2">
+                                                <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-400"><Layers size={14}/> Total General</span>
+                                                <span className="font-bold text-xl text-white brand-font">${globalTotal.toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <p className="text-[10px] text-stone-500 flex items-start gap-1.5 leading-relaxed">
+                                        <Info size={12} className="shrink-0 mt-0.5"/>
+                                        Los ahorros ya están descontados de la caja del negocio, por eso no se duplican en este total.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
 					{/* --- NUEVO BLOQUE: BUSCADORES DE FINANZAS --- */}
                     <div className="flex flex-col md:flex-row gap-4 mt-2 mb-2 animate-in fade-in slide-in-from-top-2">
                         <div className="relative flex-1">
