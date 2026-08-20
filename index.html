@@ -2237,11 +2237,7 @@ const handleDoneConfirm = async () => {
             // 3.B PATRIMONIO GLOBAL (NEGOCIO + ALCANCÍA)
             const savingsCash = savingsBalance.cash;
             const savingsDigital = savingsBalance.digital;
-            const savingsTotal = savingsBalance.total;
-            const globalTotal = realCashBalance + realTransferBalance + savingsTotal;
-            const globalCash = realCashBalance + savingsCash;      // Todo el efectivo (negocio + alcancía)
-            const globalDigital = realTransferBalance + savingsDigital; // Todo lo digital (negocio + alcancía)
-            const globalPct = (v) => globalTotal > 0 ? Math.round((v / globalTotal) * 100) : 0;
+            const globalTotal = realCashBalance + realTransferBalance + savingsBalance.total;
 
             let displayLabel = 'Balance del Mes';
             if (financeFilter === 'cash') displayLabel = 'Balance Efectivo';
@@ -2288,7 +2284,42 @@ const handleDoneConfirm = async () => {
                                 </div>
                             </div>
 
-                            <div className="flex md:flex-col gap-3 justify-end min-w-[160px]">
+                            <div className="flex flex-col gap-3 md:justify-between md:min-w-[230px]">
+
+                                {/* PATRIMONIO TOTAL (CAJA + DIGITAL + AHORROS) */}
+                                <div className="bg-white/[0.04] border border-emerald-500/20 rounded-2xl px-4 py-3 w-full">
+                                    <button onClick={() => setShowGlobalDetail(!showGlobalDetail)} className="w-full text-left">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="flex items-center gap-1.5 text-emerald-400 text-[9px] font-bold uppercase tracking-[0.15em]">
+                                                <Layers size={12}/> Patrimonio Total
+                                            </span>
+                                            {showGlobalDetail
+                                                ? <ChevronUp size={14} className="text-stone-500"/>
+                                                : <ChevronDown size={14} className="text-stone-500"/>}
+                                        </div>
+                                        <p className="text-2xl font-bold brand-font text-white mt-1.5 leading-none">
+                                            ${globalTotal.toLocaleString()}
+                                        </p>
+                                        <p className="text-[9px] text-stone-500 font-medium mt-1.5">Caja + Digital + Ahorros</p>
+                                    </button>
+
+                                    {showGlobalDetail && (
+                                        <div className="mt-3 pt-3 border-t border-white/10 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                                            {[
+                                                { label: 'Caja efectivo', value: realCashBalance, color: 'text-amber-500' },
+                                                { label: 'Banco digital', value: realTransferBalance, color: 'text-blue-400' },
+                                                { label: 'Ahorro efvo.', value: savingsCash, color: 'text-emerald-400' },
+                                                { label: 'Ahorro digital', value: savingsDigital, color: 'text-emerald-400' },
+                                            ].map(row => (
+                                                <div key={row.label} className="flex items-center justify-between gap-3">
+                                                    <span className={`text-[9px] font-bold uppercase tracking-wide ${row.color}`}>{row.label}</span>
+                                                    <span className="text-[11px] font-bold text-stone-200">${row.value.toLocaleString()}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="flex gap-2 w-full">
                                      <button onClick={() => { setEditingFinanceId(null); setIncomeForm({description: '', amount: '', method: 'cash', mixedCash: '', mixedTransfer: '', date: new Date().toISOString()}); setIsIncomeModalOpen(true); }} 
                                         className="flex-1 bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-400 py-3 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 border border-emerald-800/50 transition-all">
@@ -2322,121 +2353,6 @@ const handleDoneConfirm = async () => {
                             </div>
                         </div>
                     </div>
-					
-					{/* 1.B TARJETA PATRIMONIO GLOBAL (CAJA + DIGITAL + AHORROS) */}
-                    <div className="bg-gradient-to-br from-emerald-950 via-stone-900 to-[#0c0a09] text-white p-6 md:p-8 rounded-3xl shadow-2xl relative overflow-hidden border border-emerald-900/40">
-                        <div className="absolute right-0 bottom-0 p-8 opacity-[0.07]"><Coins size={170}/></div>
-
-                        <div className="relative z-10">
-                            {/* CABECERA */}
-                            <div className="flex items-start justify-between gap-4 mb-6">
-                                <div>
-                                    <div className="flex items-center gap-2 mb-2 text-emerald-400">
-                                        <Layers size={16}/>
-                                        <span className="text-xs font-bold uppercase tracking-[0.2em]">Patrimonio Total</span>
-                                    </div>
-                                    <h3 className="text-4xl md:text-5xl font-bold brand-font tracking-tight text-white">
-                                        ${globalTotal.toLocaleString()}
-                                    </h3>
-                                    <p className="text-[11px] text-stone-400 mt-2 font-medium">
-                                        Todo el dinero disponible: Caja + Digital + Ahorros
-                                    </p>
-                                </div>
-
-                                <button onClick={() => setShowGlobalDetail(!showGlobalDetail)}
-                                    className="shrink-0 bg-white/5 hover:bg-white/10 border border-white/10 text-stone-300 px-3 py-2 rounded-xl font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95">
-                                    {showGlobalDetail ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-                                    Detalle
-                                </button>
-                            </div>
-
-                            {/* LOS 3 PILARES */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-                                    <div className="flex items-center gap-2 mb-2 text-amber-500">
-                                        <Banknote size={15}/>
-                                        <span className="text-[10px] font-bold uppercase tracking-wider">En Caja</span>
-                                    </div>
-                                    <p className="font-bold text-2xl text-white">${realCashBalance.toLocaleString()}</p>
-                                    <p className="text-[10px] text-stone-500 mt-1 font-bold">{globalPct(realCashBalance)}% del total</p>
-                                </div>
-
-                                <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-                                    <div className="flex items-center gap-2 mb-2 text-blue-400">
-                                        <CreditCard size={15}/>
-                                        <span className="text-[10px] font-bold uppercase tracking-wider">Digital</span>
-                                    </div>
-                                    <p className="font-bold text-2xl text-white">${realTransferBalance.toLocaleString()}</p>
-                                    <p className="text-[10px] text-stone-500 mt-1 font-bold">{globalPct(realTransferBalance)}% del total</p>
-                                </div>
-
-                                <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-                                    <div className="flex items-center gap-2 mb-2 text-emerald-400">
-                                        <PiggyBank size={15}/>
-                                        <span className="text-[10px] font-bold uppercase tracking-wider">Ahorros</span>
-                                    </div>
-                                    <p className="font-bold text-2xl text-white">${savingsTotal.toLocaleString()}</p>
-                                    <p className="text-[10px] text-stone-500 mt-1 font-bold">{globalPct(savingsTotal)}% del total</p>
-                                </div>
-                            </div>
-
-                            {/* DESGLOSE AMPLIADO */}
-                            {showGlobalDetail && (
-                                <div className="mt-4 pt-5 border-t border-white/10 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-
-                                    {/* POR TIPO DE DINERO */}
-                                    <div>
-                                        <p className="text-[10px] text-stone-500 uppercase font-bold tracking-wider mb-2">Por tipo de dinero</p>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
-                                                <p className="text-[10px] text-amber-500 font-bold uppercase mb-1">Efectivo Total</p>
-                                                <p className="font-bold text-lg text-white">${globalCash.toLocaleString()}</p>
-                                                <p className="text-[9px] text-stone-500 font-medium mt-0.5">Caja ${realCashBalance.toLocaleString()} + Alcancía ${savingsCash.toLocaleString()}</p>
-                                            </div>
-                                            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
-                                                <p className="text-[10px] text-blue-400 font-bold uppercase mb-1">Digital Total</p>
-                                                <p className="font-bold text-lg text-white">${globalDigital.toLocaleString()}</p>
-                                                <p className="text-[9px] text-stone-500 font-medium mt-0.5">Banco ${realTransferBalance.toLocaleString()} + Alcancía ${savingsDigital.toLocaleString()}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* POR UBICACIÓN */}
-                                    <div>
-                                        <p className="text-[10px] text-stone-500 uppercase font-bold tracking-wider mb-2">Por ubicación</p>
-                                        <div className="space-y-1.5">
-                                            <div className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2.5">
-                                                <span className="flex items-center gap-2 text-xs font-medium text-stone-300"><Banknote size={14} className="text-amber-500"/> Negocio · Efectivo</span>
-                                                <span className="font-bold text-sm text-white">${realCashBalance.toLocaleString()}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2.5">
-                                                <span className="flex items-center gap-2 text-xs font-medium text-stone-300"><CreditCard size={14} className="text-blue-400"/> Negocio · Banco Digital</span>
-                                                <span className="font-bold text-sm text-white">${realTransferBalance.toLocaleString()}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2.5">
-                                                <span className="flex items-center gap-2 text-xs font-medium text-stone-300"><PiggyBank size={14} className="text-emerald-400"/> Alcancía · Efectivo</span>
-                                                <span className="font-bold text-sm text-white">${savingsCash.toLocaleString()}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2.5">
-                                                <span className="flex items-center gap-2 text-xs font-medium text-stone-300"><PiggyBank size={14} className="text-emerald-400"/> Alcancía · Digital</span>
-                                                <span className="font-bold text-sm text-white">${savingsDigital.toLocaleString()}</span>
-                                            </div>
-                                            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-3 mt-2">
-                                                <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-400"><Layers size={14}/> Total General</span>
-                                                <span className="font-bold text-xl text-white brand-font">${globalTotal.toLocaleString()}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <p className="text-[10px] text-stone-500 flex items-start gap-1.5 leading-relaxed">
-                                        <Info size={12} className="shrink-0 mt-0.5"/>
-                                        Los ahorros ya están descontados de la caja del negocio, por eso no se duplican en este total.
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
 					{/* --- NUEVO BLOQUE: BUSCADORES DE FINANZAS --- */}
                     <div className="flex flex-col md:flex-row gap-4 mt-2 mb-2 animate-in fade-in slide-in-from-top-2">
                         <div className="relative flex-1">
